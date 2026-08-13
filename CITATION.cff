@@ -9,7 +9,8 @@ authors:
     affiliation: "Celiums Solutions LLC"
     email: "mario@celiums.ai"
 type: software
-license: "AGPL-3.0-or-later / CC-BY-4.0"
+license: "AGPL-3.0-or-later"
+repository-code: "https://github.com/terrizoaguimor/celiumneur"
 keywords:
   - neuromorphic
   - spiking neural network
@@ -18,4 +19,4 @@ keywords:
   - golden-model parity
   - mesh NoC
   - STDP plasticity
-notes: "Verification-first invariant-driven neuromorphic SoC; see SPEC.md and NOTICE.md for the audit evidence."
+abstract: "Verification-first, invariant-driven neuromorphic SoC v1: four event-driven neuro_tiles on a 2x2 credit-based mesh NoC; see SPEC.md and NOTICE.md for the audit evidence."

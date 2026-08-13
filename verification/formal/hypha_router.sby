@@ -1,0 +1,18 @@
+[tasks]
+bmc
+
+[options]
+bmc: mode bmc
+bmc: depth 60
+
+[engines]
+bmc: smtbmc yices
+
+[script]
+read_verilog -formal -DFORMAL=1 hypha_link_fifo.v hypha_router.v hypha_router_formal.v
+prep -top hypha_router_formal
+
+[files]
+../../rtl/hyphae/hypha_link_fifo.v
+../../rtl/hyphae/hypha_router.v
+hypha_router_formal.v

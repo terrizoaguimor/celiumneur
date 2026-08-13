@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use CeliumNeUR, please cite it as below."
+title: "CeliumNeUR — a verification-first neuromorphic SoC v1"
+version: "v1.0.0"
+date-released: 2026-08-13
+authors:
+  - family-names: "Gutierrez"
+    given-names: "Mario"
+    affiliation: "Celiums Solutions LLC"
+    email: "mario@celiums.ai"
+type: software
+license: "AGPL-3.0-or-later / CC-BY-4.0"
+keywords:
+  - neuromorphic
+  - spiking neural network
+  - RISC-V-adjacent edge silicon
+  - formal verification
+  - golden-model parity
+  - mesh NoC
+  - STDP plasticity
+notes: "Verification-first invariant-driven neuromorphic SoC; see SPEC.md and NOTICE.md for the audit evidence."

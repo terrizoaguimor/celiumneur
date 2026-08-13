@@ -1,0 +1,18 @@
+CeliumNeUR — dual-licensed as follows:
+
+* All source code (Verilog RTL under rtl/, Python models/bench tooling under
+  golden/, verification/, tools/), is licensed under the GNU Affero General
+  Public License, version 3 or (at your option) any later version.
+  A copy lives in LICENSES/AGPL-3.0.txt and at <https://www.gnu.org/licenses/>.
+
+* All non-code content in this repository (SPEC.md, licenses/docs, renders,
+  posters and figures under render/) is licensed under the Creative Commons
+  Attribution 4.0 International License (CC BY 4.0).
+  A copy lives in LICENSES/CC-BY-4.0.txt and at
+  <https://creativecommons.org/licenses/by/4.0/legalcode>.
+
+Unless required by applicable law or agreed to in writing, the work is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+
+Copyright (C) 2026 Celiums Solutions LLC — CeliumNeUR project.
+Contact: mario@celiums.ai (Celiums — mycelium closed-IP house).

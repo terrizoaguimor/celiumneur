@@ -1,0 +1,22 @@
+# Bounded model checking only: obligations relate the DUT to an external
+# shadow register; naive k-induction cannot close shadow-vs-DUT equality
+# from an arbitrary (unreset) induction state, so "prove" is out of scope
+# by design. Guarantee: all legal input traces up to 60 cycles deep.
+[tasks]
+bmc
+
+[options]
+bmc: mode bmc
+bmc: depth 60
+multiclock off
+
+[engines]
+bmc: smtbmc yices
+
+[script]
+read_verilog -formal -DFORMAL=1 hypha_link_fifo.v hypha_link_fifo_formal.v
+prep -top hypha_link_fifo_formal
+
+[files]
+../../rtl/hyphae/hypha_link_fifo.v
+hypha_link_fifo_formal.v

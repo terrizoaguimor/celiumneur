@@ -1,0 +1,213 @@
+<!Doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CeliumNeUR — SoC v1 (three.js render)</title>
+<style>
+  :root { --bg:#07090f; --fg:#bfe9ee; --dim:#55707f; --acc:#35d6ea; --warn:#ff8f6b; }
+  html,body { margin:0;height:100%;background:var(--bg);overflow:hidden;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  #c { position:fixed; inset:0; display:block; }
+  .hud { position:fixed; z-index:5; color:var(--fg);
+    background:rgba(9,13,22,.72); backdrop-filter:blur(6px);
+    border:1px solid rgba(53,214,234,.25); border-radius:10px; padding:12px 16px; }
+  #title { top:18px; left:18px; max-width:520px; }
+  #title h1 { margin:0 0 4px; font-size:17px; color:var(--acc); letter-spacing:.06em; }
+  #title h1 small { color:var(--fg); font-size:12px; letter-spacing:.02em; font-weight:normal; }
+  #title p  { margin:3px 0; font-size:11px; color:var(--dim); line-height:1.5; }
+  #legend { right:18px; bottom:18px; font-size:11px; }
+  #legend .row { display:flex; gap:8px; align-items:center; margin:4px 0; }
+  .sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+  #keys { left:18px; bottom:18px; font-size:10px; color:var(--dim); }
+  kbd { border:1px solid #2b4a55; border-radius:4px; padding:0 4px; color:var(--fg); }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./three.module.js",
+    "three/addons/": "./examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" id="title">
+  <h1>CELIUMNEUR <small>· SoC v1 · three.js</small></h1>
+  <p>the chip that has no secrets.</p>
+  <p>4 neuro_tiles on the corners + Hyphae 2x2 mesh at the center.
+     Every block in the scene maps 1:1 to real RTL.</p>
+  <p>Materials legend on the right: teal = compute (soma/router),
+     salmon = dendrite/synaptic table, dark blue = snooper/fabric slab,
+     gold = die pads, bright cyan = live Hyphae links.</p>
+</div>
+
+<div class="hud" id="legend">
+  <div class="row"><span class="sw" style="background:#0f5f6b"></span>compute (soma / router)</div>
+  <div class="row"><span class="sw" style="background:#8a3d22"></span>dendrite / synaptic table</div>
+  <div class="row"><span class="sw" style="background:#14233f"></span>snooper / fabric slab</div>
+  <div class="row"><span class="sw" style="background:#d49a1a"></span>die bond pads</div>
+  <div class="row"><span class="sw" style="background:#5fe3f0"></span>Hyphae links (emissive)</div>
+</div>
+
+<div class="hud" id="keys">
+  <kbd>drag</kbd> orbit &nbsp; <kbd>wheel</kbd> zoom &nbsp; <kbd>S</kbd> save PNG &nbsp; <kbd>Space</kbd> auto-spin
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07090f);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.08).texture;
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(28, 24, 30);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 1.2, 0);
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+
+// ---------- material factory ----------
+function mat(color, { metal = 0.0, rough = 0.4, emit = null, es = 0 } = {}) {
+  const m = new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough });
+  if (emit) {
+    m.emissive = new THREE.Color(emit);
+    m.emissiveIntensity = es;
+    m.toneMapped = true;
+  }
+  return m;
+}
+
+const M_SUB  = mat(0x0c1b26, { metal: 0.5, rough: 0.22 });
+const M_GOLD = mat(0xd49a1a, { metal: 1.0, rough: 0.22 });
+const M_TEAL = mat(0x0f5f6b, { metal: 0.55, rough: 0.3 });
+const M_TL2  = mat(0x0d4a54, { metal: 0.55, rough: 0.32 });
+const M_SALM = mat(0x8a3d22, { metal: 0.45, rough: 0.35 });
+const M_SLAB = mat(0x14233f, { metal: 0.5, rough: 0.3 });
+const M_LINK = mat(0x1c5763, { metal: 0.4, rough: 0.3, emit: 0x2ec8de, es: 0.55 });
+const M_GLOW = mat(0x12303a, { metal: 0.4, rough: 0.35, emit: 0x2ac6d8, es: 0.9 });
+const M_TEXT = mat(0x9fd8dd, { metal: 0.1, rough: 0.5, emit: 0x74d6e0, es: 0.55 });
+
+function block(w, h, d, x, y, z, m, name) {
+  const g = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  g.position.set(x, y, z);
+  if (name) g.name = name;
+  scene.add(g);
+  return g;
+}
+
+// ---------- die substrate + bond pads ----------
+block(27, 1.2, 27, 0, -0.55, 0, M_SUB, 'die');
+block(24.5, 0.5, 24.5, 0, 0.02, 0, mat(0x0a1620, { metal: 0.7, rough: 0.2 }));
+
+const padN = 12, span = 25.0, step = span / (padN - 1);
+for (let i = 0; i < padN; i++) {
+  const v = -span / 2 + i * step;
+  block(1.0, 0.55, 0.8, v, 0.2, -13.05, M_GOLD);
+  block(1.0, 0.55, 0.8, v, 0.2, 13.05, M_GOLD);
+  block(0.8, 0.55, 1.0, -13.05, 0.2, v, M_GOLD);
+  block(0.8, 0.55, 1.0, 13.05, 0.2, v, M_GOLD);
+}
+
+// ---------- Hyphae mesh (center) ----------
+block(7.8, 1.0, 7.8, 0, 0.55, 0, M_SLAB, 'hyphae_mesh_2x2');
+const R = 1.95;
+for (const x of [-R, R]) for (const z of [-R, R]) {
+  block(2.8, 1.35, 2.8, x, 1.72, z, M_TL2, 'hypha_router');
+  block(1.5, 0.10, 0.16, x, 2.45, z, M_GLOW);
+  block(0.16, 0.10, 1.5, x, 2.45, z, M_GLOW);
+}
+block(3.9, 0.14, 0.22, 0, 1.85, -R, M_LINK);
+block(3.9, 0.14, 0.22, 0, 1.85, R, M_LINK);
+block(0.22, 0.14, 3.9, -R, 1.85, 0, M_LINK);
+block(0.22, 0.14, 3.9, R, 1.85, 0, M_LINK);
+
+// ---------- four tiles ----------
+const tiles = [[-7.7, 7.7], [7.7, 7.7], [-7.7, -7.7], [7.7, -7.7]];
+tiles.forEach(([tx, tz], i) => {
+  block(6.8, 0.95, 6.8, tx, 0.5, tz, M_TEAL, `neuro_tile_t${i}`);
+  for (let n = 0; n < 4; n++) {
+    block(1.05, 1.15, 1.05, tx - 2.25 + n * 1.5, 1.35, tz + 1.85, M_TEAL);
+    block(0.45, 0.08, 0.45, tx - 2.25 + n * 1.5, 1.97, tz + 1.85, M_GLOW);
+  }
+  block(5.4, 1.0, 1.5, tx, 1.2, tz + 0.1, M_SALM);   // dendrite table
+  block(5.4, 0.6, 0.5,  tx, 0.95, tz - 2.0, M_SLAB);  // snooper strip
+  const ex = (tx > 0 ? R : -R), ez = (tz > 0 ? R : -R);
+  block(Math.abs(tx - ex), 0.16, 0.18, (tx + ex) / 2, 0.85, ez, M_LINK);
+  block(0.18, 0.16, Math.abs(tz - ez), ex, 0.85, (tz + ez) / 2, M_LINK);
+});
+
+// ---------- etched text (bottom edge) ----------
+{
+  const cnv = document.createElement('canvas');
+  cnv.width = 1024; cnv.height = 128;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = '#9fd8dd';
+  ctx.font = 'bold 84px ui-monospace, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('CELIUMNEUR', 512, 64);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(10.24, 1.28),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false }),
+  );
+  plane.rotation.x = -Math.PI / 2;
+  plane.position.set(0, 0.06, -11.3);
+  scene.add(plane);
+}
+
+// ---------- floor grid ----------
+const grid = new THREE.GridHelper(60, 30, 0x18303c, 0x0d1c26);
+grid.position.y = -1.2;
+scene.add(grid);
+
+// ---------- lights ----------
+scene.add(new THREE.AmbientLight(0x1a2833, 1.2));
+const key = new THREE.DirectionalLight(0xfff3e0, 3.0); key.position.set(18, 24, 14);
+const fill = new THREE.DirectionalLight(0x7fc4ff, 1.4); fill.position.set(-20, 16, -8);
+const rim  = new THREE.DirectionalLight(0x59e0ff, 1.2); rim.position.set(0, 26, -22);
+scene.add(key, fill, rim);
+
+// ---------- postprocessing ----------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.35, 0.82);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ---------- loop + interaction ----------
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+});
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') controls.autoRotate = !controls.autoRotate;
+  if (e.code === 'KeyS') {
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = 'celiumneur_die.png';
+    a.click();
+  }
+});
+renderer.setAnimationLoop(() => { controls.update(); composer.render(); });
+</script>
+</body>
+</html>

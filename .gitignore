@@ -1,0 +1,32 @@
+# Python env / caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# simulation build dirs
+verification/cocotb/sim_build/
+*.vcd
+*.fst
+*.vvp
+results.xml
+
+# local vendor / toolchains (big, not part of the repository)
+tools/oss-cad-suite/
+tools/oss-cad-suite.tgz
+*.tgz
+
+# work scratch
+.mutant_work/
+
+# formal sby generated workdirs (keep .sby + _formal.v sources only)
+verification/formal/*/
+
+# bench logs
+verification/cocotb/suite.log
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
+*~

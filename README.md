@@ -7,6 +7,7 @@
 [![golden pytest: 53/53](https://img.shields.io/badge/golden%20pytest-53%2F53-brightgreen)](#quickstart)
 [![cocotb suite: 8/8 groups](https://img.shields.io/badge/cocotb%20suite-8%2F8%20groups-brightgreen)](#quickstart)
 [![vvp probes: 8/8](https://img.shields.io/badge/vvp%20probes-8%2F8-brightgreen)](#quickstart)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21925426.svg)](https://doi.org/10.5281/zenodo.21925426)
 [![Verilog 2001](https://img.shields.io/badge/Verilog-2001-blueviolet)](rtl/)
 [![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A5%203.11-yellow)](#quickstart)
 
@@ -149,8 +150,15 @@ celiumneur/
 
 ## Cite
 
-If you build on this, see `CITATION.cff`. A Zenodo DOI will be linked
-here upon minting.
+If you build on this, cite the archived release:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21925426.svg)](https://doi.org/10.5281/zenodo.21925426)
+
+> Gutierrez, M. (2026). *CeliumNeUR — a verification-first neuromorphic
+> SoC v1* (v0.0.1). Celiums Solutions LLC.
+> https://doi.org/10.5281/zenodo.21925426
+
+See `CITATION.cff` for the machine-readable record (Zenodo-linked).
 
 ---
 

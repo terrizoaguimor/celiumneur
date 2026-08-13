@@ -1,5 +1,6 @@
 cff-version: 1.2.0
 message: "If you use CeliumNeUR, please cite it as below."
+doi: "10.5281/zenodo.21925426"
 title: "CeliumNeUR — a verification-first neuromorphic SoC v1"
 version: "v0.0.1"
 date-released: 2026-08-13

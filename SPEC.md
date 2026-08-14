@@ -224,6 +224,10 @@ Public diagnostic surfaces include `mesh_overflow_any`, `tile_overflow_any`,
 | Router formal | legal ingress credits/routing masks, modeled egress credits, PE hold, X-first corner rule, internal overflow | BMC depth 60 PASS |
 | Synthesis | CONFIG endpoint and router GF180 mapping; default SoC coarse lowering/check | valid JSON/log receipts and hashes |
 
+The lint command sets `--unroll-count 256` so Verilator releases before 5.026
+can elaborate the design's 256-entry nonblocking reset loops. No diagnostic is
+waived; current Verilator releases accept the same command.
+
 The FIFO uses Yices and the router uses Bitwuzla through SymbiYosys. Formal
 reset is constrained low initially and high thereafter. FIFO data ordering is
 tested against a deque for 2,000 simulation cycles rather than encoded as an

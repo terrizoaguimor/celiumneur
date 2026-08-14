@@ -34,6 +34,8 @@ the `0.y.z` development phase.
 - Made malformed or incomplete CONFIG traffic fail without mutating state.
 - Closed scale-boundary, arithmetic-saturation, stale-mutant, and protocol
   witness gaps found during the full audit.
+- Serialized build-box synchronization and gate execution so mutation tests
+  cannot contaminate formal, simulation, lint, or synthesis runs.
 
 ## [0.0.1] - 2026-08-13
 

@@ -46,8 +46,12 @@ jobs:
         run: python verification/cocotb/run_tests.py --probes
 
       - name: Verilator lint
+        # Ubuntu 24.04 ships Verilator 5.020. Versions before 5.026 require
+        # explicit unrolling for nonblocking writes in 256-entry reset loops.
+        # This keeps every lint diagnostic enabled instead of waiving one.
         run: >-
-          verilator --lint-only -Wall --top-module celiumneur_soc
+          verilator --lint-only -Wall --unroll-count 256
+          --top-module celiumneur_soc
           rtl/hyphae/hypha_link_fifo.v
           rtl/hyphae/hypha_router.v
           rtl/soma/soma_dendrite.v

@@ -41,7 +41,10 @@ case "$mode" in
       verification/cocotb/run_tests.py --probes) > "$receipt_dir/gate.log" 2>&1
     ;;
   lint)
-    (cd "$repo" && verilator --lint-only -Wall --top-module celiumneur_soc \
+    # Verilator before 5.026 needs the 256-entry reset loops unrolled; retain
+    # all diagnostics instead of suppressing BLKLOOPINIT.
+    (cd "$repo" && verilator --lint-only -Wall --unroll-count 256 \
+      --top-module celiumneur_soc \
       rtl/hyphae/hypha_link_fifo.v rtl/hyphae/hypha_router.v \
       rtl/soma/soma_dendrite.v rtl/soma/soma_core.v rtl/soma/neuro_tile.v \
       rtl/top/hypha_config_endpoint.v rtl/top/hyphae_mesh_2x2.v \

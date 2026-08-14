@@ -7,7 +7,7 @@
 #   bash tools/push_and_run.sh mutants    # push + mutation gate receipt
 #   bash tools/push_and_run.sh lint       # push + Verilator receipt
 #   bash tools/push_and_run.sh synth      # push + GF180 synthesis receipts
-#   bash tools/push_and_run.sh formal     # push + formal BMCs (tmux, long)
+#   bash tools/push_and_run.sh formal     # push + formal BMCs
 set -euo pipefail
 
 DROPLET="build@159.223.142.34"
@@ -34,37 +34,34 @@ source_manifest_sha256=$(
     xargs -0 sha256sum < "$file_list" | sha256sum | cut -d' ' -f1
 )
 
-scp -q -i "$KEY" "$tmp" "$DROPLET:/tmp/celiumneur_push.tgz"
-ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-    "cd /home/build/celiumneur && \
-     tar xzf /tmp/celiumneur_push.tgz && rm /tmp/celiumneur_push.tgz && \
-     printf 'base_commit=%s\nworking_diff_sha256=%s\nsource_manifest_sha256=%s\n' \
-       '$base_commit' '$working_diff_sha256' '$source_manifest_sha256' \
-       > .source-receipt"
-
 mode="${1:-suite}"
-if [ "$mode" = "formal" ]; then
-    session="celiumneur-formal-$(date -u +%Y%m%dT%H%M%SZ)"
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "tmux new-session -d -s '$session' \
-          'bash /home/build/celiumneur/tools/remote_run_formal.sh'; \
-         tmux has-session -t '$session'; echo formal_session='$session'"
-elif [ "$mode" = "mutants" ]; then
-    session="celiumneur-mutants-$(date -u +%Y%m%dT%H%M%SZ)"
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "tmux new-session -d -s '$session' \
-          'bash /home/build/celiumneur/tools/remote_run_mutants.sh'; \
-         tmux has-session -t '$session'; echo mutation_session='$session'"
-elif [ "$mode" = "synth" ]; then
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "bash /home/build/celiumneur/tools/remote_run_synth.sh"
-elif [ "$mode" = "probes" ]; then
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "bash /home/build/celiumneur/tools/remote_run_verify.sh probes"
-elif [ "$mode" = "lint" ]; then
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "bash /home/build/celiumneur/tools/remote_run_verify.sh lint"
-else
-    ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
-        "bash /home/build/celiumneur/tools/remote_run_verify.sh suite"
-fi
+run_token="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+remote_archive="/tmp/celiumneur_push_${run_token}.tgz"
+
+scp -q -i "$KEY" "$tmp" "$DROPLET:$remote_archive"
+
+# Extraction, source-receipt creation and the complete gate share one remote
+# lock. Mutation tests therefore cannot modify the authoritative checkout
+# while formal, synthesis or simulation is copying or reading it. A unique
+# upload path also prevents concurrent callers from overwriting an archive.
+ssh -i "$KEY" -o BatchMode=yes "$DROPLET" \
+    "flock -x /home/build/celiumneur.verify.lock bash -s -- \
+      '$remote_archive' '$base_commit' '$working_diff_sha256' \
+      '$source_manifest_sha256' '$mode'" <<'REMOTE'
+set -euo pipefail
+
+archive=$1
+base_commit=$2
+working_diff_sha256=$3
+source_manifest_sha256=$4
+mode=$5
+repo=/home/build/celiumneur
+
+trap 'rm -f -- "$archive"' EXIT
+cd "$repo"
+tar xzf "$archive"
+printf 'base_commit=%s\nworking_diff_sha256=%s\nsource_manifest_sha256=%s\n' \
+  "$base_commit" "$working_diff_sha256" "$source_manifest_sha256" \
+  > .source-receipt
+bash tools/remote_dispatch.sh "$mode"
+REMOTE

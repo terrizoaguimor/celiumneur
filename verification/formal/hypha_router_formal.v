@@ -1,11 +1,9 @@
 // Formal wrapper for hypha_router at corner core (0,0) (SymbiYosys).
 //
-// Proven obligations:
-//   R1: credit accounting exactness — a shadow "debt" register tracks every
-//       spend and return; the DUT counter must always equal DEPTH - debt.
-//       (Returns only legal when debt > 0: environment assumption.)
-//   R2: no egress without credit — a registered out_*_valid implies its
-//       credit was non-zero when the grant was decided.
+// Bounded obligations:
+//   R1: each observable mesh egress consumes one modeled output credit and
+//       legal returns replenish it; the external credit model stays 0..4.
+//   R2: no E/W/N/S egress is observable without a modeled credit.
 //   R3: X-first witness — no vertical (N/S) egress may ever carry a mask
 //       whose destinations are off this column (the turn-model invariant
 //       that makes the fabric deadlock-free; Glass & Ni 1992).
@@ -21,7 +19,8 @@ module hypha_router_formal (
     input wire [31:0] in_w_data,   input wire in_w_valid,
     input wire [31:0] in_n_data,   input wire in_n_valid,
     input wire [31:0] in_s_data,   input wire in_s_valid,
-    input wire [3:0]  credit_ret_i
+    input wire [3:0]  credit_ret_i,
+    input wire        pe_out_ready
 );
     wire [31:0] out_pe_data, out_e_data, out_w_data, out_n_data, out_s_data;
     wire out_pe_valid, out_e_valid, out_w_valid, out_n_valid, out_s_valid;
@@ -37,6 +36,7 @@ module hypha_router_formal (
         .in_n_data(in_n_data),   .in_n_valid(in_n_valid),
         .in_s_data(in_s_data),   .in_s_valid(in_s_valid),
         .credit_ret_i(credit_ret_i),
+        .pe_out_ready(pe_out_ready),
         .feeder_ret_o(feeder_ret_o),
         .out_pe_data(out_pe_data), .out_pe_valid(out_pe_valid),
         .out_e_data(out_e_data),   .out_e_valid(out_e_valid),
@@ -70,10 +70,8 @@ module hypha_router_formal (
         if (in_n_valid)  assume(mask_n != 0 && (mask_n & 4'b0011) == mask_n);
     end
 
-    // R1: shadow debt per output slot {E,W,N,S}: grows on egress-valid
-    // (spend), shrinks on credit returns. Environment may only return when
-    // debt > 0. All references are ports or local shadow state (no
-    // hierarchical peeks — a proof tied to internals rots with the RTL).
+    // Ingress credit contract. Each upstream owns four credits and may send
+    // only while one is available; a DUT pop returns exactly one.
     // Ingress contract environment: each upstream neighbor (and the local
     // core on PE) owns a credit counter per link. It may only present
     // in_*_valid while its counter is positive; the counter refills by one
@@ -97,6 +95,51 @@ module hypha_router_formal (
         end
     end
 
+    // R1/R2: black-box egress credit model, one counter per {E,W,N,S}.
+    // out_*_valid is the registered spend witness visible at the boundary.
+    reg [2:0] out_credit [3:0];
+    wire [3:0] mesh_out_valid = {
+        out_s_valid, out_n_valid, out_w_valid, out_e_valid
+    };
+    integer co;
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            for (co = 0; co < 4; co = co + 1)
+                out_credit[co] <= 3'd4;
+        end else begin
+            for (co = 0; co < 4; co = co + 1)
+                out_credit[co] <= out_credit[co]
+                                  + (credit_ret_i[co] ? 3'd1 : 3'd0)
+                                  - (mesh_out_valid[co] ? 3'd1 : 3'd0);
+        end
+    end
+
+    always @(*) begin
+        for (co = 0; co < 4; co = co + 1)
+            if (credit_ret_i[co]) assume(out_credit[co] < 3'd4);
+    end
+
+    always @(posedge clk) begin
+        if (past_valid && rst_n) begin
+            for (co = 0; co < 4; co = co + 1) begin
+                assert(out_credit[co] <= 3'd4);
+                if (mesh_out_valid[co]) assert(out_credit[co] != 3'd0);
+            end
+            for (co = 0; co < 5; co = co + 1)
+                assert(ncred[co] <= 3'd4);
+        end
+    end
+
+    // The PE lane is valid/ready rather than credit-based: payload and valid
+    // must remain stable for every stalled cycle.
+    always @(posedge clk) begin
+        if (past_valid && $past(rst_n)
+            && $past(out_pe_valid && !pe_out_ready)) begin
+            assert(out_pe_valid);
+            assert(out_pe_data == $past(out_pe_data));
+        end
+    end
+
     // R3: X-first. Corner (0,0): N egress masks may only reference column-0
     // cores (ids 0 and 2 → bits {0,2} = 4'b0101); there is no y < 0, so S
     // egress must never fire at all from this corner.
@@ -108,7 +151,8 @@ module hypha_router_formal (
         end
     end
 
-    // R4: fabric-internal overflow witness must never assert.
+    // R4: fabric-internal overflow witness must never assert under the
+    // ingress credit contract above.
     always @(posedge clk) begin
         if (past_valid) assert(!overflow_any);
     end

@@ -108,6 +108,9 @@ module hypha_router #(
     wire [4:0]  pop_i;
 
     genvar gi;
+    // Full is implicit in the credit contract; overflow is the public breach
+    // witness. The FIFO's full pin is intentionally not duplicated here.
+    /* verilator lint_off PINCONNECTEMPTY */
     generate
         for (gi = 0; gi < 5; gi = gi + 1) begin : g_in_fifos
             hypha_link_fifo #(
@@ -121,6 +124,7 @@ module hypha_router #(
             );
         end
     endgenerate
+    /* verilator lint_on PINCONNECTEMPTY */
 
     assign overflow_any = |ov_i;
 
@@ -170,15 +174,28 @@ module hypha_router #(
     // Round-robin: first serviceable input from rr_ptr wins.
     reg  [2:0] rr_ptr;
     integer    k;
+    reg  [2:0] candidate_idx;
     reg  [2:0] sel_idx;
     reg        sel_valid;
     always @(*) begin
         sel_valid = 1'b0;
         sel_idx   = 3'd0;
+        candidate_idx = rr_ptr;
         for (k = 0; k < 5; k = k + 1) begin
-            if (!sel_valid && serviceable[(rr_ptr + k) % 5]) begin
+            case (k)
+                0: candidate_idx = rr_ptr;
+                1: candidate_idx = (rr_ptr >= 3'd4) ? rr_ptr - 3'd4
+                                                     : rr_ptr + 3'd1;
+                2: candidate_idx = (rr_ptr >= 3'd3) ? rr_ptr - 3'd3
+                                                     : rr_ptr + 3'd2;
+                3: candidate_idx = (rr_ptr >= 3'd2) ? rr_ptr - 3'd2
+                                                     : rr_ptr + 3'd3;
+                default: candidate_idx = (rr_ptr >= 3'd1) ? rr_ptr - 3'd1
+                                                           : rr_ptr + 3'd4;
+            endcase
+            if (!sel_valid && serviceable[candidate_idx]) begin
                 sel_valid = 1'b1;
-                sel_idx   = (rr_ptr + k) % 5;
+                sel_idx   = candidate_idx;
             end
         end
     end

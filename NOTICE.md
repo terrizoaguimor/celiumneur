@@ -13,7 +13,7 @@ gratitude; no RTL from them was copied:
 
 - ODIN — C. Frenkel, M. Lefebvre, J.-D. Legat, D. Bol, IEEE TBioCAS 13(1),
   2019 (arXiv:1804.07858). HDL released under Solderpad Hardware License
-  2.0 (UCLouvain). Audited; informed our invariants via its weaknesses.
+  2.0 (UCLouvain). Audited; its structural tradeoffs informed our invariants.
 - ReckOn — C. Frenkel, G. Indiveri, ISSCC 2022. HDL released under
   Solderpad Hardware License 2.1 (University of Zurich). Audited.
 - Event-Driven Spiking Neural Network Accelerator for FPGA — J. Lee
@@ -23,6 +23,12 @@ gratitude; no RTL from them was copied:
 
 Nothing in this notice grants rights to their works; those remain under
 their licenses and authors.
+
+The exact repositories, commits, Git trees, license hashes, evidence-file
+hashes and line-range hashes are locked in
+[`audit/source_snapshot.lock.json`](audit/source_snapshot.lock.json). The
+interpretation and clean-checkout reproducer are in [`audit/`](audit/README.md).
+No third-party RTL is stored in this repository.
 
 ## References on which the engineering semantics stand
 
@@ -39,3 +45,15 @@ their licenses and authors.
   Nat. Commun. 11:3625, 2020 (e-prop; roadmap §5.8).
 
 Verification record and debt: see SPEC.md.
+
+## Bundled presentation runtime
+
+`render/html/` includes selected unmodified Three.js runtime and example
+modules solely for the interactive chip visualization. They remain © Three.js
+authors and are distributed under the MIT license; the exact notice is in
+`render/html/THIRD-PARTY-NOTICES.md`. These files are not CeliumNeUR RTL and
+the project's AGPL license does not replace their upstream license.
+
+The OSS CAD Suite may be installed locally by the bootstrap tooling but is not
+tracked or redistributed by this repository. Icarus Verilog, Verilator,
+Yosys, SymbiYosys, solvers and PDK content retain their own upstream licenses.

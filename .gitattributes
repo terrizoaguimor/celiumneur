@@ -1,0 +1,15 @@
+* text=auto
+
+*.md text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.sby text eol=lf
+*.v text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+requirements*.in text eol=lf
+requirements*.txt text eol=lf
+
+*.png binary
+*.jpg binary
+*.svg text eol=lf

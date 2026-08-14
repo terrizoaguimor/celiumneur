@@ -11,24 +11,32 @@ module dual_probe_tb;
     reg        spk_valid = 0;
     reg  [9:0] spk_gid = 0;
     reg        spk_parity = 1;
+    integer events = 0;
+    integer fires = 0;
+    integer packets = 0;
 
     reg        cfg_en = 0;
-    reg  [4:0] cfg_addr = 0;
-    reg  [20:0] cfg_wdata = 0;
+    reg  [3:0] cfg_addr = 0;
+    reg  [26:0] cfg_wdata = 0;
 
-    neuro_tile #(.GID_BASE(0), .NEURONS(4), .ID_BITS(2)) dut (
+    neuro_tile #(.GID_BASE(0), .NEURONS(4), .ID_BITS(2),
+                 .DEFAULT_AXON_MASK(4'hf)) dut (
         .clk(clk), .rst_n(rst_n),
         .spk_valid(spk_valid), .spk_gid(spk_gid), .spk_parity(spk_parity),
         .spk_ready(), .spk_overflow_wit(),
-        .stim_valid(1'b0), .stim_neuron(8'd0), .stim_weight(8'd0),
-        .tick(1'b0), .integrate_open(1'b1),
+        .stim_valid(1'b0), .stim_neuron(8'd0), .stim_weight(8'd0), .stim_ready(),
+        .tick(1'b0), .tick_ready(), .integrate_open(1'b1),
         .cfg_en(cfg_en), .cfg_addr(cfg_addr), .cfg_wdata(cfg_wdata),
-        .rb_dend_addr(5'd0), .rb_dend_rdata(),
+        .cfg_ready(),
+        .cfg_soma_en(1'b0), .cfg_soma_addr(8'd0),
+        .cfg_soma_wdata(64'd0), .cfg_soma_ready(),
+        .cfg_axon_en(1'b0), .cfg_axon_addr(2'd0),
+        .cfg_axon_wdata(4'd0), .cfg_axon_ready(),
+        .rb_dend_addr(4'd0), .rb_dend_rdata(),
         .rb_soma_addr(8'd0), .rb_soma_req(1'b0),
-        .rb_soma_data(), .rb_soma_ready(),
-        .axon_masks(16'hffff),
+        .rb_soma_data(), .rb_soma_ready(), .rb_soma_valid(),
         .out_spk_valid(), .out_spk_pkt(), .out_spk_ready(1'b1),
-        .out_stall_wit(),
+        .out_stall_wit(), .fire_overflow_wit(),
         .dend_busy(), .tile_busy()
     );
     initial begin
@@ -37,10 +45,11 @@ module dual_probe_tb;
         repeat (3) @(negedge clk);
 
         // neuron 0: theta=200, subtractive, leak=15, refractory=0
-        dut.soma.nram[0] = { 16'd200, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0 };
+        dut.soma.nram[0] = {16'd200, 1'b1, 4'd15, 8'd0, 8'd0,
+                            8'd0, 3'b0, 16'd0};
         // entry 0: gid1 -> post0, w=150
-        cfg_addr = 5'd0;
-        cfg_wdata = (1'b1 << 20) | (10'd1 << 10) | (2'd0 << 8) | 8'd120;
+        cfg_addr = 4'd0;
+        cfg_wdata = (1'b1 << 26) | (10'd1 << 16) | (8'd0 << 8) | 8'd120;
         cfg_en = 1'b1;
         @(posedge clk); @(negedge clk); cfg_en = 1'b0;
 
@@ -53,16 +62,20 @@ module dual_probe_tb;
         @(posedge clk); @(negedge clk); spk_valid = 1'b0;
         repeat (120) @(negedge clk);
 
-        $display("PROBE v0_word=%h", dut.soma.nram[0]);
+        if (events != 2 || fires != 1 || packets != 1
+                || dut.soma.nram[0][15:0] != 16'd40) begin
+            $display("DUAL-PROBE-FAIL events=%0d fires=%0d packets=%0d v=%0d",
+                     events, fires, packets, dut.soma.nram[0][15:0]);
+            $finish_and_return(1);
+        end
+        $display("DUAL-PROBE-PASS events=2 fires=1 packets=1 v=40");
         $finish;
     end
 
     always @(negedge clk) begin
-        if (dut.soma.fire_valid)
-            $display("FIRE t=%0t neuron=%0d", $time, dut.soma.fire_neuron);
-        if (dut.dendrite.ev_valid)
-            $display("EV t=%0t neuron=%0d w=%0d", $time,
-                     dut.dendrite.ev_neuron, $signed(dut.dendrite.ev_weight));
+        if (dut.soma.fire_valid && dut.soma.fire_ready) fires = fires + 1;
+        if (dut.dendrite.ev_valid && dut.ev_ready) events = events + 1;
+        if (dut.out_spk_valid) packets = packets + 1;
     end
 endmodule
 

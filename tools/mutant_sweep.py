@@ -12,15 +12,19 @@ restores it, ALWAYS, even on error (try/finally). This reuses the blessed
 runner path instead of a bespoke sim harness whose env-layering already
 burned an afternoon, once.
 
-Usage (WSL):  python tools/mutant_sweep.py hypha_link_fifo
+Usage:  python tools/mutant_sweep.py all
+        python tools/mutant_sweep.py hypha_router
 """
 
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "verification" / "cocotb" / "run_tests.py"
+MUTANT_TIMEOUT_SECONDS = 10
 
 # (mutant_id, rtl_file_rel_to_rtl, old, new) — anchor old must match 1x.
 MUTANTS = {
@@ -65,26 +69,40 @@ MUTANTS = {
          "if (v_next >= theta) begin"),
     ],
     "soma_dendrite": [
-        # LTP paid without the causal window
-        ("pot_without_window", "soma/soma_dendrite.v",
-         "&& (tick_cnt - ledger_tick[scan_i]) <= WINDOW)",
-         ")"),
+        # LTP window collapsed to same-tick-only.
+        ("pot_window_zero", "soma/soma_dendrite.v",
+         "<= WINDOW) begin",
+         "<= 0) begin"),
         # expiry threshold off by one (>= instead of >)
         ("expiry_window_off_by_one", "soma/soma_dendrite.v",
-         "&& (tick_cnt - ledger_tick[scan_i]) > WINDOW) begin",
-         "&& (tick_cnt - ledger_tick[scan_i]) >= WINDOW) begin"),
+         "> WINDOW) begin",
+         ">= WINDOW) begin"),
+    ],
+    "hypha_config_endpoint": [
+        ("commit_does_not_backpressure", "top/hypha_config_endpoint.v",
+         "assign pkt_ready = !commit_pending;",
+         "assign pkt_ready = 1'b1;"),
+        ("fragment_order_ignored", "top/hypha_config_endpoint.v",
+         "|| packet_kind != expected_kind",
+         "|| 1'b0"),
+        ("nested_header_allowed", "top/hypha_config_endpoint.v",
+         "if (transaction_active || pkt_body[6:0] != 7'd0",
+         "if (pkt_body[6:0] != 7'd0"),
+    ],
+    "soc_scale": [
+        ("four_neurons_only", "top/celiumneur_soc.v",
+         "parameter NEURONS_PER_TILE    = 256,",
+         "parameter NEURONS_PER_TILE    = 4,"),
+        ("axon_config_ignored", "soma/neuro_tile.v",
+         "axon_table[cfg_axon_addr] <= cfg_axon_wdata;",
+         "axon_table[cfg_axon_addr] <= axon_table[cfg_axon_addr];"),
     ],
 }
 
 # Mutants whose survival is *justified and documented* (reviewed per case,
 # not swept under the rug). Each entry carries the reason the check is
 # structurally unreachable. Do not add entries to quiet the suite.
-KNOWN_SURVIVORS = {
-    # POT's window can never be false when reached: the expiry pass always
-    # destroys a stale ledger entry before any later fire consults it.
-    # Kept as belt-and-braces insurance; the survivor is the proof it's dead.
-    ("soma_dendrite", "pot_without_window"): "unreachable: expiry precedes any late consult",
-}
+KNOWN_SURVIVORS = {}
 
 # suite tag printed by run_tests.py per logical mutant target
 SUITE_TAG = {
@@ -93,50 +111,91 @@ SUITE_TAG = {
     "hypha_sync_fifo": "hypha_sync_fifo",
     "soma_core": "soma_core",
     "soma_dendrite": "neuro_tile",
+    "hypha_config_endpoint": "hypha_config_endpoint",
+    "soc_scale": "celiumneur_soc",
 }
 
 
 def run_suite_for(module):
     """Returns (suite_rc, verdict_line_for_module)."""
-    proc = subprocess.run(
-        [sys.executable, str(RUNNER)], cwd=ROOT, capture_output=True, text=True,
-        timeout=3600,
-    )
     tag = SUITE_TAG.get(module, module)
-    verdict = [ln for ln in proc.stdout.splitlines() if tag in ln]
+    proc = subprocess.Popen(
+        [sys.executable, str(RUNNER), tag],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=(os.name != "nt"),
+    )
+    try:
+        stdout, _stderr = proc.communicate(timeout=MUTANT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+        proc.communicate()
+        return 124, [
+            f"[FAIL] {tag}: {MUTANT_TIMEOUT_SECONDS}s timeout under mutant"
+        ]
+    verdict = [ln for ln in stdout.splitlines() if tag in ln]
     return proc.returncode, verdict
 
 
-def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in MUTANTS:
-        print(f"usage: {sys.argv[0]} <{'|'.join(MUTANTS)}>")
-        sys.exit(2)
-    module = sys.argv[1]
+def run_group(module):
+    """Run one mutation group and return True only when every mutant dies."""
     survivors = []
+    skipped = []
     for mid, rel, old, new in MUTANTS[module]:
         target = ROOT / "rtl" / rel
         original = target.read_text()
         if original.count(old) != 1:
             print(f"[SKIP] {mid}: anchor matched {original.count(old)}x (expected 1)")
+            skipped.append(mid)
             continue
         try:
             target.write_text(original.replace(old, new))
             rc, verdict = run_suite_for(module)
-            failed_early = rc != 0 and any("FAIL" in ln for ln in verdict)
+            failed_early = rc != 0 and any(
+                "FAIL" in ln or "ERROR" in ln for ln in verdict
+            )
             status = "KILLED" if failed_early else "SURVIVED"
             if status == "SURVIVED" and (module, mid) in KNOWN_SURVIVORS:
                 print(f"[JUSTIFIED] {module}/{mid}: {KNOWN_SURVIVORS[(module, mid)]}")
                 continue
-            print(f"[{status}] {module}/{mid} :: {verdict[0] if verdict else '(no line)'}")
+            print(
+                f"[{status}] {module}/{mid} :: "
+                f"{verdict[0] if verdict else '(no line)'}",
+                flush=True,
+            )
             if status == "SURVIVED":
                 survivors.append(mid)
         finally:
             target.write_text(original)   # always restore
     total = len(MUTANTS[module])
-    print(f"\nsummary {module}: {total - len(survivors)}/{total} killed")
-    if survivors:
-        print(f"SURVIVORS: {survivors} — strengthen the tests, never the RTL")
+    killed = total - len(survivors) - len(skipped)
+    print(f"\nsummary {module}: {killed}/{total} killed")
+    if survivors or skipped:
+        if survivors:
+            print(f"SURVIVORS: {survivors} — strengthen the tests, never the RTL")
+        if skipped:
+            print(f"SKIPPED: {skipped} — stale mutation anchors are a gate failure")
+        return False
+    return True
+
+
+def main():
+    choices = ["all", *MUTANTS]
+    if len(sys.argv) != 2 or sys.argv[1] not in choices:
+        print(f"usage: {sys.argv[0]} <{'|'.join(choices)}>")
+        sys.exit(2)
+
+    selected = MUTANTS if sys.argv[1] == "all" else [sys.argv[1]]
+    failed_groups = [module for module in selected if not run_group(module)]
+    if failed_groups:
+        print(f"\nmutation gate failed: {', '.join(failed_groups)}")
         sys.exit(1)
+    print(f"\nmutation gate passed: {len(selected)} group(s)")
 
 
 if __name__ == "__main__":

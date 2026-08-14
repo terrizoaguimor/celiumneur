@@ -1,7 +1,5 @@
-// soc_probe_tb.v — vvp probe of the whole SoC v1 demo scenario in one place.
+// soc_probe_tb.v — raw-vvp proof of packet config, multicast and GID 1023.
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// This is the reviewer's instrument: no cocotb environment between us and
-// the fabric. If this writes the golden fire multiset, the chain is VIVA.
 `timescale 1ns/1ps
 `default_nettype none
 
@@ -9,151 +7,145 @@ module soc_probe_tb;
     reg clk = 0, rst_n = 0;
     always #5 clk = ~clk;
 
-    reg        tick = 0;
-    reg        integrate_open = 0;
-    reg  [1:0] stim_tile = 0;
-    reg        stim_valid = 0;
-    reg  [7:0] stim_neuron = 0;
-    reg  [7:0] stim_weight = 0;
-    reg  [1:0] cfg_tile = 0;
-    reg        cfg_en = 0;
-    reg  [4:0] cfg_addr = 0;
-    reg  [20:0] cfg_wdata = 0;
-    reg        cfg_which = 0;
-    reg  [63:0] cfg_soma_data = 0;
-    reg  [1:0] rb_tile = 0;
-    reg  [4:0] rb_addr = 0;
-    reg        rb_req = 0;
+    reg tick = 0;
+    reg host_valid = 0;
+    reg [31:0] host_packet = 0;
+    wire host_ready;
+    reg [1:0] stim_tile = 0;
+    reg stim_valid = 0;
+    reg [7:0] stim_neuron = 0;
+    reg [7:0] stim_weight = 0;
+    wire stim_ready;
+    wire [3:0] config_protocol_error;
+    wire [3:0] mesh_overflow_any;
 
     celiumneur_soc dut (
-        .clk(clk), .rst_n(rst_n), .tick(tick), .integrate_open(integrate_open),
+        .clk(clk), .rst_n(rst_n),
+        .tick(tick), .tick_ready(), .tick_backpressure(),
+        .tick_overflow_wit(),
+        .host_valid(host_valid), .host_packet(host_packet),
+        .host_ready(host_ready),
+        .integrate_open(1'b1),
         .stim_tile(stim_tile), .stim_valid(stim_valid),
         .stim_neuron(stim_neuron), .stim_weight(stim_weight),
-        .cfg_tile(cfg_tile), .cfg_en(cfg_en), .cfg_addr(cfg_addr),
-        .cfg_wdata(cfg_wdata),
-        .cfg_which(cfg_which), .cfg_soma_data(cfg_soma_data),
-        .rb_tile(rb_tile), .rb_addr(rb_addr), .rb_req(rb_req),
-        .rb_dend_rdata(), .rb_soma_data(),
-        .mesh_overflow_any()
+        .stim_ready(stim_ready),
+        .rb_tile(2'd0), .rb_addr(8'd0), .rb_req(1'b0),
+        .rb_dend_rdata(), .rb_soma_data(), .rb_ready(), .rb_valid(),
+        .mesh_overflow_any(mesh_overflow_any), .tile_overflow_any(),
+        .tile_backpressure(), .tile_busy(), .tile_dend_busy(),
+        .spike_backpressure_count(),
+        .config_protocol_error(config_protocol_error),
+        .unsupported_packet_wit()
     );
 
-    integer fire_count [0:15];
-    integer t;
-
-    initial for (t = 0; t < 16; t = t + 1) fire_count[t] = 0;
-
-    // cfg helper: write a dendrite entry into a tile
-    task cfg_entry(input [1:0] tile_sel, input [4:0] addr,
-                   input [9:0] pre_gid, input [1:0] post, input [7:0] w);
+    task send_packet;
+        input [31:0] packet;
         begin
-            cfg_tile = tile_sel;
-            cfg_addr = addr;
-            cfg_wdata = (1'b1 << 20) | (pre_gid << 10) | (post << 8) | w;
-            cfg_which = 0;                 // lane: dendrite table
-            cfg_en = 1;
-            @(posedge clk); @(negedge clk); cfg_en = 0;
             @(negedge clk);
-        end
-    endtask
-
-    // cfg helper: write neuron params into a tile's soma word
-    task cfg_soma(input [1:0] tile_sel, input neuron, input [63:0] word);
-        begin
-            cfg_tile = tile_sel;
-            cfg_which = 1;                 // lane: soma autonomous word
-            cfg_soma_data = word;
-            cfg_addr = neuron;
-            cfg_en = 1;
-            @(posedge clk); @(negedge clk); cfg_en = 0;
+            host_packet = packet;
+            host_valid = 1'b1;
+            while (!host_ready) @(negedge clk);
+            @(posedge clk);
             @(negedge clk);
+            host_valid = 1'b0;
         end
     endtask
 
-    // bench tick then integration window
-    task phase(input integer open_cycles);
+    integer fragment;
+    reg [19:0] body;
+    task config_write;
+        input [3:0] mask;
+        input [1:0] space;
+        input [7:0] addr;
+        input [63:0] data;
         begin
-            @(posedge clk); tick = 1;
-            @(negedge clk); tick = 0;
-            integrate_open = 1;
-            repeat (open_cycles) @(negedge clk);
-            integrate_open = 0;
+            body = {3'd0, space, addr, 7'd0};
+            send_packet({4'h2, 4'd0, mask, body});
+            for (fragment = 0; fragment < 4; fragment = fragment + 1) begin
+                body = 20'd0;
+                body[19:17] = fragment + 1;
+                body[16:1] = data[fragment*16 +: 16];
+                send_packet({4'h2, 4'd0, mask, body});
+            end
         end
     endtask
 
-    task stim(input [1:0] tile_sel, input [7:0] w);
-        begin
-            stim_tile = tile_sel;
-            stim_neuron = 8'd0;
-            stim_weight = w;
-            @(posedge clk); stim_valid = 1;
-            @(negedge clk); stim_valid = 0;
-        end
-    endtask
+    integer timeout;
+    integer packet_count = 0;
+    reg [9:0] observed_gid = 0;
+    reg [3:0] observed_mask = 0;
+    reg [63:0] multicast_word;
 
     initial begin
         repeat (4) @(negedge clk);
         rst_n = 1'b1;
+        timeout = 0;
+        while ((dut.t0.tile_busy || dut.t1.tile_busy
+                || dut.t2.tile_busy || dut.t3.tile_busy) && timeout < 400) begin
+            timeout = timeout + 1;
+            @(negedge clk);
+        end
+        if (timeout == 400) begin
+            $display("SOC-PROBE-FAIL reset sweep timeout");
+            $finish_and_return(1);
+        end
 
-        // wait for the post-reset wipe sweep to complete on tile0 as proxy
-        repeat (10) @(negedge clk);
+        // A single branch-replicated transaction writes the same state word
+        // into local neuron 200 on all four physical tiles.
+        multicast_word = {16'd1234, 1'b0, 4'd7, 8'd9, 8'd0,
+                          8'd0, 3'b0, 16'hfebf};
+        config_write(4'hf, 2'd1, 8'd200, multicast_word);
+        timeout = 0;
+        while ((dut.t0.soma.nram[200] !== multicast_word
+                || dut.t1.soma.nram[200] !== multicast_word
+                || dut.t2.soma.nram[200] !== multicast_word
+                || dut.t3.soma.nram[200] !== multicast_word)
+               && timeout < 1000) begin
+            timeout = timeout + 1;
+            @(negedge clk);
+        end
 
-        // ---- program tile 0/1 electrodes: neuron 0: theta=100 ----
-        cfg_soma(2'd0, 8'd0, {16'd100, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0});
-        cfg_soma(2'd1, 8'd0, {16'd100, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0});
-        // detector tile2: theta=200 (fires on pair only)
-        cfg_soma(2'd2, 8'd0, {16'd200, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0});
-        // output tile3: theta=100, refractory 4
-        cfg_soma(2'd3, 8'd0, {16'd100, 1'b1, 4'd15, 8'd4, 8'd0, 3'b0, 16'd0});
+        // Program the last neuron and its per-neuron axon route by packets.
+        config_write(4'h8, 2'd1, 8'd255,
+                     {16'd10, 1'b1, 4'd15, 8'd0, 8'd0,
+                      8'd0, 3'b0, 16'd0});
+        config_write(4'h8, 2'd2, 8'd255, 64'h1);
+        timeout = 0;
+        while (dut.t3.axon_table[255] !== 4'h1 && timeout < 1000) begin
+            timeout = timeout + 1;
+            @(negedge clk);
+        end
 
-        // ---- dendrite tables: gid0/4 -> tile2 | gid8 -> tile3 ----
-        cfg_entry(2'd2, 5'd0, 10'd0, 2'd0, 8'd120);   // gid0 -> post0
-        cfg_entry(2'd2, 5'd1, 10'd4, 2'd0, 8'd120);   // gid4 -> post0
-        cfg_entry(2'd3, 5'd0, 10'd8, 2'd0, 8'd120);   // gid8 -> post0
+        @(negedge clk);
+        stim_tile = 2'd3;
+        stim_neuron = 8'd255;
+        stim_weight = 8'd60;
+        stim_valid = 1'b1;
+        while (!stim_ready) @(negedge clk);
+        @(posedge clk);
+        @(negedge clk);
+        stim_valid = 1'b0;
 
-        // ---- the demo: same phases as demo_net.run_demo_script ----
-        stim(2'd0, 8'd120); phase(60);
-        phase(60);
-        stim(2'd1, 8'd120); phase(60);
-        phase(60);
-        stim(2'd0, 8'd120); stim(2'd1, 8'd120); phase(60);  // pair
-        phase(60);
-        stim(2'd0, 8'd120); stim(2'd1, 8'd120); phase(60);  // re-pair
-        phase(60);
-        repeat (10) phase(60);                             // settle
-
-        $display("SOC-PROBE firecounts: n0=%0d n4=%0d n8=%0d n12=%0d",
-                 fire_count[0], fire_count[4], fire_count[8], fire_count[12]);
+        repeat (600) @(negedge clk);
+        if (timeout == 1000 || packet_count != 1 || observed_gid != 10'd1023
+                || observed_mask != 4'h1
+                || config_protocol_error != 4'd0
+                || mesh_overflow_any != 4'd0) begin
+            $display("SOC-PROBE-FAIL multicast_timeout=%0d packets=%0d gid=%0d mask=%b cfgerr=%b mesh=%b",
+                     timeout == 1000, packet_count, observed_gid, observed_mask,
+                     config_protocol_error, mesh_overflow_any);
+            $finish_and_return(1);
+        end
+        $display("SOC-PROBE-PASS multicast=4 gid=1023 packets=1");
         $finish;
     end
 
-    // catch every fire packet on the fabric egress plane
     always @(negedge clk) begin
-        for (t = 0; t < 4; t = t + 1)
-            if (dut.pe_out_valid[t]) begin
-                fire_count[((dut.pe_out_data >> (t*32)) & 10'h3FF)] =
-                    fire_count[((dut.pe_out_data >> (t*32)) & 10'h3FF)] + 1;
-            end
-        // physical truth at tile level first
-        if (dut.t0.soma.fire_valid) begin
-            $display("[t=%0t] tile0 fires n=%0d (state=%0d busy=%0d)",
-                     $time, dut.t0.soma.fire_neuron, dut.t0.soma.state,
-                     dut.t0.tile_busy);
+        if (dut.t3.out_spk_valid) begin
+            packet_count = packet_count + 1;
+            observed_gid = dut.t3.out_spk_pkt[9:0];
+            observed_mask = dut.t3.out_spk_pkt[23:20];
         end
-        if (dut.t1.soma.fire_valid) begin
-            $display("[t=%0t] tile1 fires n=%0d (state=%0d)",
-                     $time, dut.t1.soma.fire_neuron, dut.t1.soma.state);
-        end
-        if (dut.t0.out_spk_valid)
-            $display("[t=%0t] t0 out pkt mask=%b gid=%0d axon_masks=%h",
-                     $time, dut.t0.out_spk_pkt[23:20], dut.t0.out_spk_pkt[9:0],
-                     dut.t0.axon_masks);
-        if (dut.t0.soma.fire_valid)
-            $display("[t=%0t] t0 FIRE n=%0d", $time, dut.t0.soma.fire_neuron);
-        if (dut.t0.fire_taken)
-            $display("[t=%0t] t0 TAKE pkt=%h", $time, dut.t0.pktq_dout);
-        if (dut.t2.out_spk_valid)
-            $display("[t=%0t] t2 out pkt mask=%b gid=%0d",
-                     $time, dut.t2.out_spk_pkt[23:20], dut.t2.out_spk_pkt[9:0]);
     end
 endmodule
 

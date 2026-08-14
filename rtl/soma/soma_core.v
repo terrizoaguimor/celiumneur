@@ -29,7 +29,8 @@
 
 module soma_core #(
     parameter NEURONS = 4,
-    parameter ID_BITS = 2               // clog2(NEURONS)
+    parameter ID_BITS = 2,              // clog2(NEURONS)
+    parameter TICK_BITS = 10
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -42,7 +43,9 @@ module soma_core #(
 
     // Time tick: sweeps every neuron once (I7: per-neuron params/rule).
     input  wire        tick_req,
+    output wire        tick_ready,
     output wire        sweep_active,
+    output wire        busy,
 
     // Autonomous configuration (the reviewer hole, closed): the host writes
     // the full neuron word when the engine is idle. Parameters land atomically
@@ -50,20 +53,25 @@ module soma_core #(
     input  wire        cfg_en,
     input  wire [7:0]  cfg_addr,
     input  wire [63:0] cfg_wdata,
+    output wire        cfg_ready,
 
-    // Fire strobe (one per cycle whenever a neuron fires).
+    // Fire channel. Payload remains stable while valid && !ready.
     output reg         fire_valid,
     output reg  [7:0]  fire_neuron,
+    output reg         fire_parity,
+    output reg  [TICK_BITS-1:0] fire_tick,
+    input  wire        fire_ready,
+    input  wire        phase_parity,
+    input  wire [TICK_BITS-1:0] phase_tick,
 
-    // State readback for observability (v1: only while idle; reads cost the
-    // same 2-cycle path as updates; hot-readback arrives with the I5 plane).
+    // Independent asynchronous observation port. The request never enters
+    // the update arbiter and therefore cannot halt events or tick sweeps.
     input  wire [7:0]  rb_addr,
     input  wire        rb_req,
-    output reg  [63:0] rb_data,
-    output wire        rb_ready
+    output wire [63:0] rb_data,
+    output wire        rb_ready,
+    output wire        rb_valid
 );
-
-    localparam integer N_NEURONS = NEURONS;
 
     // ------------------------------------------------------------------
     // State memory (behavioral 64-bit RAM; v1: single bank, structural
@@ -86,10 +94,10 @@ module soma_core #(
     function [15:0] leak_mag;  // ceil(|v| / 2**k)
         input signed [15:0] v;
         input [3:0]         k;
-        reg   [16:0]        magnitude, biased;
+        reg   [15:0]        magnitude, biased;
         begin
-            magnitude = v[15] ? {1'b0, -v} : {1'b0, v};
-            biased    = magnitude + ((17'd1 << k) - 17'd1);
+            magnitude = v[15] ? -v : v;
+            biased    = magnitude + ((16'd1 << k) - 16'd1);
             leak_mag  = (v == 16'sd0) ? 16'd0 : (biased >> k);
         end
     endfunction
@@ -102,7 +110,8 @@ module soma_core #(
                      S_EV_AP   = 3'd2,
                      S_SW_RD   = 3'd3,
                      S_SW_AP   = 3'd4,
-                     S_INIT    = 3'd5;   // post-reset deterministic zero-sweep
+                     S_INIT    = 3'd5,   // post-reset deterministic zero-sweep
+                     S_FIRE    = 3'd6;   // hold fire until downstream accepts
 
     reg [2:0]  state;
     reg [7:0]  op_neuron;        // neuron being serviced
@@ -110,10 +119,19 @@ module soma_core #(
     reg signed [7:0] op_weight;
     reg [7:0]  sweep_idx;
     reg [63:0] word_q;           // captured RAM word for the in-flight op
+    reg        fire_from_sweep;
+    reg        fire_last_in_sweep;
 
-    assign sweep_active = (state == S_SW_RD) || (state == S_SW_AP) || (state == S_INIT);
-    assign ev_ready = (state == S_IDLE);
-    assign rb_ready = (state == S_IDLE);
+    assign sweep_active = (state == S_SW_RD) || (state == S_SW_AP)
+                       || (state == S_INIT)
+                       || ((state == S_FIRE) && fire_from_sweep);
+    assign busy = (state != S_IDLE);
+    assign cfg_ready = (state == S_IDLE);
+    assign ev_ready = (state == S_IDLE) && !cfg_en;
+    assign tick_ready = (state == S_IDLE) && !cfg_en && !ev_valid;
+    assign rb_ready = 1'b1;
+    assign rb_valid = rb_req;
+    assign rb_data = nram[rb_addr[ID_BITS-1:0]];
 
     wire signed [15:0] v_mem   = word_q[15:0];
     wire [7:0]  refr_cnt       = word_q[26:19];
@@ -135,6 +153,8 @@ module soma_core #(
         v_next    = v_mem;
         refr_next = refr_cnt;
         fire_next = 1'b0;
+        lmag       = 16'd0;
+        acc_wide   = {v_mem[15], v_mem};
         // integrate path
         if (op_is_tick) begin
             lmag = leak_mag(v_mem, leak_k);
@@ -173,9 +193,11 @@ module soma_core #(
             word_q      <= 64'd0;
             fire_valid  <= 1'b0;
             fire_neuron <= 8'd0;
-            rb_data     <= 64'd0;
+            fire_parity <= 1'b0;
+            fire_tick   <= {TICK_BITS{1'b0}};
+            fire_from_sweep <= 1'b0;
+            fire_last_in_sweep <= 1'b0;
         end else begin
-            fire_valid <= 1'b0;
             case (state)
                 S_INIT: begin
                     // inert-by-default neuron: theta max, all else zero —
@@ -183,19 +205,20 @@ module soma_core #(
                     // wipe would misfire spontaneously; that is the kind of
                     // bug an unreviewed default wins you).
                     nram[init_i] <= 64'h7FFF_0000_0000_0000;
-                    if (init_i == NEURONS - 1) state <= S_IDLE;
+                    if ({1'b0, init_i} == NEURONS - 1) state <= S_IDLE;
                     else init_i <= init_i + 8'd1;
                 end
                 S_IDLE: begin
-                    if (cfg_en) begin
+                    fire_valid <= 1'b0;
+                    if (cfg_en && cfg_ready) begin
                         // stand-alone configuration write (no touch of datapath)
                         nram[cfg_addr] <= cfg_wdata;
-                    end else if (ev_valid) begin
+                    end else if (ev_valid && ev_ready) begin
                         op_neuron  <= ev_neuron;
                         op_is_tick <= 1'b0;
                         op_weight  <= ev_weight;
                         state      <= S_EV_RD;
-                    end else if (tick_req) begin
+                    end else if (tick_req && tick_ready) begin
                         sweep_idx <= 8'd0;
                         state     <= S_SW_RD;
                     end
@@ -209,8 +232,14 @@ module soma_core #(
                     if (fire_next) begin
                         fire_valid  <= 1'b1;
                         fire_neuron <= op_neuron;
+                        fire_parity <= phase_parity;
+                        fire_tick   <= phase_tick;
+                        fire_from_sweep <= 1'b0;
+                        fire_last_in_sweep <= 1'b0;
+                        state <= S_FIRE;
+                    end else begin
+                        state <= S_IDLE;
                     end
-                    state <= S_IDLE;
                 end
                 S_SW_RD: begin
                     word_q <= nram[sweep_idx[ID_BITS-1:0]];
@@ -221,22 +250,36 @@ module soma_core #(
                     if (fire_next) begin
                         fire_valid  <= 1'b1;
                         fire_neuron <= sweep_idx;
-                    end
-                    if (sweep_idx == NEURONS - 1) begin
+                        fire_parity <= phase_parity;
+                        fire_tick   <= phase_tick;
+                        fire_from_sweep <= 1'b1;
+                        fire_last_in_sweep <= ({1'b0, sweep_idx} == NEURONS - 1);
+                        if ({1'b0, sweep_idx} != NEURONS - 1)
+                            sweep_idx <= sweep_idx + 8'd1;
+                        state <= S_FIRE;
+                    end else if ({1'b0, sweep_idx} == NEURONS - 1) begin
                         state <= S_IDLE;
                     end else begin
                         sweep_idx <= sweep_idx + 8'd1;
                         state     <= S_SW_RD;
                     end
                 end
-                default: state <= S_IDLE;
+                S_FIRE: begin
+                    if (fire_ready) begin
+                        fire_valid <= 1'b0;
+                        if (fire_from_sweep && !fire_last_in_sweep)
+                            state <= S_SW_RD;
+                        else
+                            state <= S_IDLE;
+                    end
+                end
+                default: begin
+                    fire_valid <= 1'b0;
+                    state <= S_IDLE;
+                end
             endcase
             // sweep sequencing state for the in-flight tick op
             if (state == S_SW_RD) begin op_neuron <= sweep_idx; op_is_tick <= 1'b1; end
-            // readback: two-cycle handshake on idle only
-            if (rb_req && state == S_IDLE) begin
-                rb_data <= nram[rb_addr[ID_BITS-1:0]];
-            end
         end
     end
 

@@ -1,255 +1,304 @@
-# CeliumNeUR v1 — Design Charter
+# CeliumNeUR v1 — Executable Design Contract
 
-Licenses: code AGPL-3.0+, documentation CC BY 4.0 — see LICENSE / LICENSES/.
-Independent-work statement + acknowledgements: NOTICE.md.
+This document defines the behavior implemented by the repository. It replaces
+historical progress notes with a single auditable contract. Code is licensed
+AGPL-3.0-or-later; documentation and artwork are CC BY 4.0. Provenance and
+third-party boundaries are recorded in `NOTICE.md`.
 
-Academic-grade neuromorphic processor design. Founded after a structural audit of
-four open RTL designs (ODIN, ReckOn, ed-snn-fpga, lif-tt-asic) whose architectural
-flaws this project is chartered to avoid.
+## 1. Status and claim boundary
 
-Frozen decisions (2026-08-12):
-- **Target**: simulation-first. Toolflow: Icarus/Verilator + cocotb + SymbiYosys.
-- **Neuron**: improved LIF (see §3).
-- **Scale**: 4 SomaCores x 256 neurons = 1024 neurons on a 2x2 Hyphae mesh.
+CeliumNeUR v1 is synthesizable Verilog-2001 validated by golden models, RTL
+simulation, bounded formal checks, mutation testing, lint and pre-PnR
+synthesis. The default `celiumneur_soc` parameters are:
 
----
+| Parameter | Value | Consequence |
+|---|---:|---|
+| `NEURONS_PER_TILE` | 256 | 8-bit local neuron address |
+| `SYNAPSES_PER_TILE` | 256 | 8-bit physical synapse address |
+| Tiles | 4 | 2×2 mesh; tile IDs 0–3 |
+| Global neuron IDs | 0–1023 | `tile × 256 + local_neuron` |
 
-## 1. Non-negotiable invariants (each maps to an audited flaw)
+The repository does not claim PnR, timing closure, SRAM-macro integration,
+power closure, FPGA deployment, tapeout readiness or silicon validation.
+Block areas below are standard-cell mapping baselines, not physical-chip area.
 
-| # | Invariant | Flaw it kills | Evidence of the flaw |
-|---|---|---|---|
-| I1 | No spike is ever dropped silently. Credit-based backpressure end-to-end. | Silent drops: ODIN (`scheduler.v:190`, `aer_out.v:143`), ed-snn-fpga (`core_group.v:420`) | audit 2026-08-12 |
-| I2 | Synaptic indirection: network topology lives in tables, not SRAM geometry. | Dense-only mapping: ReckOn (`srnn.v:1007`), ODIN packing | audit |
-| I3 | One hardened CDC cell (`hypha_sync_fifo`) is the only place signals cross clock domains. | ODIN `AERIN_ADDR` never captured (`controller.v:127-131`); ReckOn `clk_or` + unassigned sync regs (`reckon.v:470,71-72`) | audit |
-| I4 | Learning snoops the fabric; it never stalls event processing. | ReckOn EPROP mutually exclusive with events (`srnn.v:711-741`); ed-snn-fpga STDP blind to pre spikes (`event_router_ng.v:222-229`) | audit |
-| I5 | Non-invasive observability: any neuron's state readable while running at full rate. | ReckOn: recurrent spikes never leave the chip; lif-tt-asic: `v_mem` unconnected (`project.v:55,64,73,82`) | audit |
-| I6 | Saturating arithmetic everywhere. Overflow clamps, never wraps. | lif-tt-asic modular wrap (`lif_components.v:9`) | audit |
-| I7 | Per-neuron independent parameters (threshold, leak, refractory). | ReckOn pairs forced to share alpha/threshold (`srnn.v:1063-1066`) | audit |
-| I8 | Tests must exercise dynamics (force spikes), never certify silence. | lif-tt-asic: 0% spike coverage in `test.py` | audit |
+## 2. Non-negotiable invariants
 
-## 2. Hyphae — the fabric / engine (v0 contract)
-
-Single semantic plane for everything: spikes, config, learning signals, telemetry.
-Host never writes registers; it emits Hyphae packets.
-
-- Packet: 32-bit single-flit. `type[3:0] | payload[27:0]`.
-  Types: SPIKE, SPIKE_TS, CONFIG_WR, CONFIG_RD, LEARN, MONITOR, CREDIT.
-- Routing: X-Y dimension order on 2D mesh (deadlock-free by construction).
-- Flow control: credit-based. A router emits only against available credit -> I1 by construction.
-- Multicast: branch-replication inside each router -> unlimited fanout.
-  (Kills ODIN's 512-cycle serial fanout and ed-snn-fpga's fanout<=16 cap.)
-- CDC: all inter-domain traffic through `hypha_sync_fifo` (gray pointers,
-  address and request captured together). v0 runs single-clock; the cell is
-  built and formally verified from day one so multi-domain is plug-in later.
-
-## 3. SomaCore — neuron datapath (v1)
-
-Model: discrete-time fixed-point LIF, forward Euler per
-Gerstner & Kistler (Ch.1.3) and snnTorch (Eshraghian et al. 2023):
-
-    V[t+1] = sat( V[t] - ceilLeak(V[t], k) + I_syn[t] )    on time tick / event
-    spike  = V[t+1] >= theta   (if refractory_counter == 0)
-    reset  = V - theta (subtract, default)  or  0           (configurable)
-
-Properties chartered:
-- Vmem signed 16-bit, saturation to +-32767 (I6).
-- Leak implemented as ceiling-division on magnitude (`ceilDivShift`):
-  guarantees convergence to exactly 0 with no sticky residues
-  (kills lif-tt-asic `>>>3` truncation floors, audit §"lif-tt-asic").
-- Refractory: absolute for spiking, inputs still integrate (relative-flavored);
-  counter decrements per tick — real time semantics, not "leak sweeps"
-  (kills ed-snn-fpga refractory-in-sweeps, audit).
-- Reset mode configurable subtract/zero (snnTorch default = subtract, less lossy).
-
-Per-neuron parameters: `theta`, `leak_shift`, `refractory_ticks`, `reset_mode` (I7).
-
-## 4. Golden model discipline
-
-`golden/` is the bit-exact Python referee of the RTL. RTL is never written
-ahead of the golden model; cocotb compares cycle-by-cycle against it.
-Rule: a mismatched waveform is a bug in RTL or in the model — never tolerated,
-always traced to root cause before proceeding.
-
-## 5. Roadmap
-
-1. [x] golden/soma model + dynamics tests (19 golden tests).
-2. [x] hypha_sync_fifo + Hyphae router + link FIFOs, cocotb + formal BMC-60.
-3. [x] SomaCore datapath vs golden (time-multiplexed; fire-seq + bit-exact state).
-4. [x] Mesh 2x2 integration, directed + 64-packet storm vs golden HyphaeMesh.
-5. [x] Plasticity: golden Pair-STDP v1.2 + `soma_dendrite.v` (I2 table + I4
-   snooper) + neuro_tile, verified against the Python referee with per-round
-   trajectory (A->8 reaches rail 127, control ≤90). 30/30 identical rounds.
-5b. [x] **SoC v1** (`celiumneur_soc.v`: 4 neuro_tiles on the mesh, stimulus,
-    bidirectional PE credits, static axon maps) + raster RTL≡golden.
-5c. [x] **Phase-gating** (tick parity in packet + integration window):
-    the SoC raster vs golden collapses to equality-modulo-tag. Free golden
-    LDL test: the sandbox replicates the exact schedule (untouched).
-6. Observability plane (monitor mirrors, hot state readback) — I5.
-7. Thin host stack: burst config via Hyphae packets (kills SPI-boot walls).
-8. Optional: eligibility-trace fabric for e-prop (Bellec et al. 2020) as surfacing.
-
-## 6. Verification ledger (living record)
-
-| Date | Scope | Method | Result |
-|---|---|---|---|
-| 2026-08-12 | golden/soma improved LIF | pytest 19 tests (dynamics, saturation, refractory, I7) | PASS |
-| 2026-08-12 | golden/hyphae mesh (X-Y, multicast, credits) | pytest 46 tests | PASS |
-| 2026-08-12 | hypha_link_fifo | cocotb 2/2 (boundaries + 2000-cycle stress with oracle) + BMC-60 | PASS |
-| 2026-08-12 | hypha_router (corner 0,0) | cocotb golden parity (unicast/multicast/random) + BMC-60 (X-first, no-overflow) | PASS |
-| 2026-08-12 | hypha_sync_fifo (CDC 10ns/7ns) | cocotb 1/1 (200 items, exact order, no loss) + raw smoke 64/64 | PASS |
-| 2026-08-12 | soma_core (4 neurons, heterogeneous params) | cocotb vs golden: fire sequence + bit-exact 64-bit words after 120 mixed ops | PASS |
-| 2026-08-12 | hyphae_mesh_2x2 (4 routers) | cocotb vs HyphaeMesh: directed + 64-packet storm, overflow audit every cycle | PASS |
-| 2026-08-12 | formal on droplet (celiumneur-build-1) | fifo BMC-60 + router BMC-60 (X-first, no-overflow, bidirectional contract) | PASS (remote, tmux) |
-| 2026-08-12 | golden sandbox end-to-end (golden_net) | demo_net: golden raster, hand-predicted dynamics matched | PASS |
-| 2026-08-12 | golden plasticity (Pair-STDP v1.2) | demo_plasticity: paired wires potentiate to rail, control depresses; tests 53/53 | PASS |
-| 2026-08-12 | neuro_tile (I2 dendrite + I4 snooper + soma) | cocotb vs referee: identical per-round weight trajectory ×30, rail and floor respected | PASS |
-| 2026-08-12 | gate 4 (mutants): hypha_link_fifo | 3/3 killed (off-by-one full, push guard, count direction) | PASS |
-| 2026-08-12 | gate 4 (mutants): hypha_sync_fifo | 2/2 killed (broken gray, non-complemented full) | PASS |
-| 2026-08-12 | gate 4 (mutants): hypha_router | xfirst_broken KILLED by bench legality witness; rr_stuck KILLED (overnight remote verdict); credit_gate: pending in tmux | 2/3 + 2 new witnesses |
-| 2026-08-13 | GF180 baseline synthesis (pre-PnR, liberty mcu7t5v0 tt/25C/5V, ABC -D 20ns) | soma_core ≈ 64.7k µm²; router ≈ 91k µm² hierarchical; 2×2 mesh ≈ 364k µm² (memory in FFs, no macros — deliberately pessimistic floor) | BANKED DATA |
-| 2026-08-13 | release package: LICENSE (routing), LICENSES/AGPL-3.0.txt + CC-BY-4.0.txt (canonical texts), NOTICE.md (acknowledgements+independent-work), regenerated technical poster | — | READY |
-| 2026-08-13 | gate 4 (mutants): hypha_router credit_gate | 3/3 tests FROM the router bench fail with the inverted gate (gate 4 closes) | **KILLED** |
-| 2026-08-13 | gate 4 (mutants): soma_core | 2/2 killed (reversed leak, blind refractory) | PASS |
-| 2026-08-13 | gate 4 (mutants): soma_dendrite | expiry off-by-one KILLED by new window-edge test; pot_without_window JUSTIFIED (unreachable condition: expiry always runs first) | PASS |
-| 2026-08-13 | **SoC v1 E2E** (4 tiles + mesh) + comparative raster | chip fires == golden fires (multiset); detector ×2, output ×1, electrodes ×3 | **PASS — the chip thinks** |
-| 2026-08-13 | Phase-gating: tick parity in packets + integration window | the depth-2 cascade aligned: golden fires appear in the chip at the same tick or +1 (bench tagging offset, not physics). Comparative raster regenerated | PASS |
-
-### Real design bugs found by verification (root cause recorded)
-
-1. **hypha_router: egress packet packing omitted reserved[27:24]** — the
-   golden model caught it via parity divergence. Fix: type+reserved passthrough.
-2. **hypha_sync_fifo: combinational flags** → zero-delay evaluation loop
-   (full → next-ptr → next-gray → full) that dragged the simulator down to
-   ~0.4 ns/s. Fix: registered flags (Cummings canonical fifo1 convention).
-3. **soma_core: the refractory counter decremented on events** — misaligning
-   the golden model semantics (only ticks age). Fix: gate by op_is_tick.
-4. **plasticity v1.0/v1.1: two pedagogical ordering artifacts** — (a) evaluating
-   STDP with the post's last spike made every pairing anti-causal by
-   construction; (b) LTD-on-arrival + LTP-on-fire created an asymmetric tax
-   from packet emission order. Both caught by the golden demo failing the
-   "paired wire must potentiate" assertion. The v1.2 rule (LTD only on window
-   expiry) makes it impossible by design.
-
-### Verification infra
-
-- Workstation: single source of truth for the code.
-- **celiumneur-build-1 (DO nyc1, c-8, dedicated cpu)** = verification box:
-  `bash tools/push_and_run.sh` pushes the delta (<200 KB) and runs the remote
-  suite; `push_and_run.sh formal` leaves the BMCs in remote tmux (persists if
-  the lid closes). Reprovisionable bootstrap: `tools/bootstrap_buildbox.sh`.
-
-### Harness lessons / house rules
-
-- cocotb bench discipline: stimulus on the falling edge, sample after
-  NBA; never sample registered outputs right after RisingEdge.
-- FWFT: register the head BEFORE pulsing pop, or you read the next element.
-- resets in formal: any net not driven by an event is free `anyinit`;
-  model the environment with a FIXED reset sequence and port contracts
-  (I1 is a TWO-party contract: the environment also respects credits).
-- Shape of the v1 formal bounds: BMC-60 (no k-induction: shadow-vs-DUT
-  equality does not close by induction from arbitrary states).
-
-### Open formal debt
-
-- **D-formal-01** (router): re-express the credit window (debt ≤ DEPTH)
-  as an assume-guarantee pair against a reference link model; the current
-  harness (shadow counters) produces contradictions with the solver.
-  Physical coverage meanwhile: cocotb shadow-audit on every test.
-- **D-bench-01**: the router bench (FabricProbe) went through three
-  architectures before becoming trustworthy — (1) capture cadence-offset by
-  one cycle (1-cycle pulses invisible), (2) two coroutines sharing clock
-  edges (scheduler-dependent interleaving). The final form: ONE single edge
-  owner with synchronous `step(drives)`. House rule: a single coroutine
-  touches the edges; everything else enters via step().
-- **Process risk**: mutant_sweep mutates the tree in place with
-  try/finally; a suite timeout with pending restore left the RTL mutated
-  once (caught and manually restored with lint verification). The safe
-  practice: per-mutant verdicts one-at-a-time with immediate restore,
-  or long runs on the droplet with tmux.
-
-## References
-
-- W. Gerstner, W. M. Kistler, R. Naud, L. Paninski, *Neuronal Dynamics*,
-  Cambridge Univ. Press, Ch. 1.3 "Integrate-And-Fire Models".
-  https://neuronaldynamics.epfl.ch/online/Ch1.S3.html (verified 2026-08-12)
-- J. K. Eshraghian et al., "Training Spiking Neural Networks Using Lessons
-  From Deep Learning", Proc. IEEE 111(9), 2023; snnTorch Tutorial 2
-  https://snntorch.readthedocs.io/en/latest/tutorials/tutorial_2.html (verified 2026-08-12)
-- C. Frenkel, M. Lefebvre, J.-D. Legat, D. Bol, "A 0.086-mm2 ... ODIN ...",
-  IEEE TBioCAS 13(1):145-158, 2019. arXiv:1804.07858. RTL audited.
-- C. Frenkel, G. Indiveri, "ReckOn: ...", ISSCC 2022. RTL audited.
-- lif-tt-asic (TinyTapeout GF180, I. Stankulov) and ed-snn-fpga (J. Lee, MIT).
-  RTL audited 2026-08-12; line evidence in the audit record.
-- G. Bellec et al., "A solution to the learning dilemma for recurrent networks
-  of spiking neurons", Nature Communications 11:3625, 2020 (e-prop; roadmap §5.8).
-
----
-
-## Appendix A — First external review (recorded 2026-08-13, reviewer digest a805e04e224)
-
-External review found REAL defects; disposition per finding:
-
-| Finding | Status | Evidence |
+| ID | Contract | Observable evidence |
 |---|---|---|
-| I1 broken at mesh-to-tile seam (skid 2-slot drop, no witness) | CLOSED | hypha_link_fifo + PE valid-until-ready handshake in hypha_router; adversarial skid test is GREEN |
-| fire_queued single-slot overwrite | CLOSED | 4-deep FIFO + fire_taken handshake; dual-fire pays both [11,11] |
-| axon out single-latch drop | CLOSED | real design bug, two layers: concat width inflation erased the mask lanes, and the held-fight register was clobbered by mid-flight fires; fixed with 10-bit gid wire + lockstep packet fifo; adversarial axon burst GREEN in cocotb |
-| 16 neurons implemented vs 1024 claimed | DOCUMENTED | SPEC already documented 4x4; renamed public claims to match |
-| SoC not autoconfigurable; no post-reset init | CLOSED | autonomous soma config lane (cfg_which/cfg_soma_*) + S_INIT wipe sweep on rst release; benches wait for it |
-| I4 not concurrent / I5 only-when-idle | POSITIONED-HONESTLY | targets; not claims |
-| "Pair-STDP v1.2" too strong vs Song-Miller-Abbott | CLOSED-RENAMED | rule re-branded CWR (causal-window rule); comparison to reference STDP is future work |
-| No reproducible audit pack | OPEN | pending packaging of the four referenced repos + tools |
-| No git / CI / lockfile | PARTIAL | .gitignore + CITATION.cff done; lock file + CI pending next |
-| poster hardcodes 10 points | OPEN | regenerate the plot from demoplasticity's real trajectory |
-| third-party (three.js MIT / oss-cad-suite) boundary | OPEN | next pass of NOTICE.md |
+| I1 | No accepted transaction is silently lost when every producer obeys `valid/ready` or the documented credit contract. | Held-valid assertions, queue overflow witnesses, adversarial stalls, shadow models, BMC |
+| I2 | Connectivity is stored in an addressable synapse table, independent of memory geometry. | 256 physical entries/tile; configurable `pre_gid`, `post_local`, weight |
+| I3 | Clock-domain crossings use `hypha_sync_fifo`; the default SoC itself is single-clock. | CDC module stress test and raw probe |
+| I4 | Synapse integration and learning are independent walkers; learning does not stop accepted fabric traffic globally. | overlap-directed cocotb tests and busy outputs |
+| I5 | Soma and dendrite state are readable without entering the update/configuration arbiters. | live readback tests during activity |
+| I6 | Neuron and weight arithmetic saturates instead of wrapping. | golden parity, boundary tests and mutants |
+| I7 | Threshold, leak, refractory and reset mode are stored per neuron. | heterogeneous-state tests |
+| I8 | Verification must force state changes and spikes; a silent simulation cannot pass as functional evidence. | fire-count, GID, weight and waveform assertions |
 
-Suite state at this checkpoint (counts of cocotb suite + vvp probes + pytest):
-pytest golden 53/53 PASS; cocotb suite (fifo 2, router 3, cdc 1, soma 1, mesh 2, tile 2, soc 1) all PASS; probes dir 6/6 PASS including axon burst at metal level. The two cocotb environment artifacts (axon cocotb watcher, soc exact-equality strengthening) are registered, not fixed this run.
+I1 is a two-party safety contract. A producer must hold `valid` and payload
+stable until `ready`, or spend only an available credit. Arbitrary producers
+that ignore backpressure can overrun any finite implementation; the design
+exposes such attempts through witnesses rather than claiming the impossible.
 
-## Open desk at the seam (2026-08-13 night, after the review fires closed)
+## 3. Top-level transaction contract
 
-- All three reviewed drop-paths are STRUCTURALLY closed (skid FIFO + PE valid-until-ready + fire queue + axon queue): adversarial skid=8/8; dual-fire=11,11; AXON probe vvp=packets [0,1,2] correct.
-- RESOLVED in the closure pass below: the "cocotb watcher / soc exact-equality"
-  items were not bench defects — they were two REAL design bugs (concat width
-  inflation + single-register flight clobber). Both fixed; see "Closure pass".
-- S_INIT wipe sweep works; bench driver awareness of sweep-then-program ordering is enforced inside the benches.
+### 3.1 Tick
 
-## Closure pass (2026-08-13, post-compaction session) — both "bench tickets" were REAL design bugs
+`tick && tick_ready` accepts exactly one token into an eight-entry global FIFO.
+A queued tick is dispatched to all four tiles in the same cycle only when every
+tile reports ready. `tick_backpressure` reports an attempted transfer while
+full; `tick_overflow_wit` is the underlying sticky FIFO witness.
 
-The two residual reds were not bench instrumentation. Fresh evidence-driven hunt:
+### 3.2 Stimulus
 
-1. **Concat width bug (soc exact-equality)**: in `neuro_tile` packet assembly,
-   `GID_BASE_I + soma_fire_neuron` was a 32-bit integer expression inside a
-   32-bit concat target, inflating the packet to 54 bits; truncation kept only
-   the gid operand and erased the route-mask+header lanes. Every egress packet
-   carried `mask=0`, the mesh dropped everything, and the SoC detector never
-   integrated. Diagnosed by vvp repro (`held_latch_tb`): latch executed,
-   RHS printed correct lanes, reg read back 0. Fix: 10-bit `fire_gid` wire
-   from `localparam [9:0] GID_LSB`. Result: SoC cocotb now shows
-   chip == golden EXACT multiset (electrodes ×3 each, detector ×2, output ×1).
-2. **Mid-flight fire clobber (axon middle packet)**: `held_packet` was a
-   single register latched at fire and pushed on arbiter take+1; the dendrite
-   arbiter take is scan-latency away (>300 cycles observed), so any second
-   fire in the flight window overwrote the register — gid 1 vanished and
-   gid 2 was emitted twice. Fix: packet fifo `pktq` in lockstep with the
-   neuron fireq, pushed at fire time, popped on take (FWFT head valid in the
-   take cycle), outq fed directly. Probe: fires 0,1,2 → packets 0,1,2 ×1 each.
+`stim_valid`, `stim_tile`, `stim_neuron` and `stim_weight` form a normal
+valid/ready transaction. Each tile owns a stimulus FIFO. The producer must hold
+the complete payload until `stim_ready` for the selected tile.
 
-Bench hygiene debts repaid in the same pass:
-- S_INIT sweep-then-program race: probes/benches now wait for
-  `sweep_active == 0` before poking nram (the "only neuron 1 configures"
-  scar — wipe was overwriting pokes, previously misread as watcher loss).
-- stim strobe pacing: a soma event costs ~3 fabric cycles; mid-event strobes
-  drop by design. Benches space strobes (axon burst still overlaps in the
-  take window — the burst content of the test is intact).
-- `axon_masks` undriven in the adversarial bench made packets unresolvable
-  (X); bench now drives 16 hFFFF.
-- vvp `$fatal` returns rc 0 in this toolchain: probes that self-check use
-  `$finish_and_return(1)` instead, because run_tests.py--probes verdicts are
-  returncode-based.
+### 3.3 Host ingress
 
-Suite after closure: cocotb 8/8 groups PASS (fifo 2, router 3, cdc 1, soma 1,
-mesh 2, tile 2, adversarial 3, soc 1 — exact multiset equality vs golden);
-vvp probes 8/8 PASS with assertion teeth (axon burst now fails loudly on
-incomplete fires/packets). The two former "open bench tickets" are CLOSED as
-design fixes.
+`host_valid`, `host_packet` and `host_ready` inject a Hyphae flit through PE0.
+Host traffic wins PE0 arbitration for the accepted cycle. `host_ready`
+acknowledges **fabric injection**, not remote configuration commit. Software
+must complete the five-flit transaction and, when required, observe endpoint or
+readback state before relying on the new configuration.
+
+### 3.4 Readback
+
+`rb_tile`, `rb_addr` and `rb_req` select both the 27-bit dendrite word and the
+64-bit soma word. Soma readback is asynchronous to the update FSM and returns
+`rb_valid` without stalling an event or sweep. Dendrite readback is likewise a
+separate array read port in this behavioral RTL. Physical macro selection must
+preserve this logical non-invasive contract.
+
+## 4. Hyphae fabric
+
+### 4.1 Common flit
+
+```text
+31          28 27          24 23          20 19                 0
++--------------+--------------+--------------+--------------------+
+| type         | reserved=0   | destination  | type-specific body |
++--------------+--------------+--------------+--------------------+
+```
+
+Implemented endpoint types are `SPIKE=0x1` and `CONFIG=0x2`. Unknown types,
+nonzero common reserved bits, or a non-one-hot local delivery mask stall at the
+tile boundary and assert `unsupported_packet_wit[tile]`.
+
+### 4.2 Routing and flow control
+
+`hypha_router` uses X-first dimension-order routing over the 2×2 mesh. A
+multicast mask is split by branch and reduced as it advances. Every mesh input
+owns a four-flit FIFO. Upstream credit counters start at four, decrement on
+send, and increment on a returned credit. PE delivery uses valid/ready and must
+hold payload under stall.
+
+This routing discipline is covered at corner (0,0) by bounded formal checks;
+it is not a general proof for arbitrary mesh dimensions.
+
+### 4.3 SPIKE body
+
+```text
+[19]    source tick parity
+[18:10] reserved, zero
+[9:0]   source global neuron ID
+```
+
+Each neuron owns a configurable 4-bit axon destination mask. Reset defaults are
+tile 0→tile 2, tile 1→tile 2, tile 2→tile 3 and tile 3→none, preserving the demo
+network while allowing every entry to be rewritten through CONFIG space 2.
+
+Inbound spikes with the current phase parity wait in the tile input FIFO until
+the phase changes; `integrate_open` is the explicit integration gate.
+
+## 5. Routed configuration protocol
+
+A CONFIG transaction is five ordered flits with the same destination mask.
+After the common header, the 20-bit bodies are:
+
+```text
+header: [19:17] kind=0 | [16:15] space | [14:7] address | [6:0] zero
+data 1: [19:17] kind=1 | [16:1] data[15:0]  | [0] zero
+data 2: [19:17] kind=2 | [16:1] data[31:16] | [0] zero
+data 3: [19:17] kind=3 | [16:1] data[47:32] | [0] zero
+data 4: [19:17] kind=4 | [16:1] data[63:48] | [0] zero
+```
+
+Spaces are:
+
+| Space | Target | Significant payload bits |
+|---:|---|---|
+| 0 | Dendrite entry | `[26:0]` |
+| 1 | Soma neuron word | `[63:0]` |
+| 2 | Axon destination mask | `[3:0]` |
+| 3 | Reserved/invalid | none |
+
+Each destination tile assembles independently, so one ordered stream may
+multicast the same write. The final fragment creates a held commit transaction;
+the endpoint stops accepting more fragments until the selected target accepts
+the write. Reserved-bit violations, missing/out-of-order fragments, nested
+headers and reserved space set sticky `config_protocol_error[tile]`, cancel the
+partial transaction and never write configuration.
+
+## 6. Neuron, synapse and learning behavior
+
+### 6.1 Soma word
+
+```text
+[63:48] threshold, unsigned 16-bit
+[47]    reset mode: 1 subtract threshold, 0 reset to zero
+[46:43] leak shift k
+[42:35] refractory duration in ticks
+[34:27] reserved, write zero
+[26:19] refractory countdown state
+[18:16] reserved flags, write zero
+[15:0]  membrane potential, signed 16-bit
+```
+
+On a time tick, leak moves the membrane potential toward zero by
+`ceil(abs(v) / 2**k)`. Synaptic input and leak use a widened accumulator and
+clamp to signed 16-bit range. A neuron fires when it is not refractory and the
+updated potential reaches its threshold. Fire payload records local neuron,
+phase parity and physical fire tick, and remains stable until accepted.
+Refractory countdown ages on ticks, not synaptic events.
+
+Reset performs a deterministic 256-entry zero sweep before the soma accepts
+normal work. Configuration writes an entire neuron word atomically while idle.
+
+### 6.2 Synapse word
+
+```text
+[26]    valid
+[25:16] presynaptic global neuron ID
+[15:8]  postsynaptic local neuron ID
+[7:0]   signed weight
+```
+
+Integration scans all physical entries for one accepted presynaptic GID. Every
+matching entry emits an independent soma event under valid/ready; duplicate
+table entries therefore have real multiplicity.
+
+### 6.3 Causal-window rule (CWR)
+
+The integration walker records the latest accepted arrival tick per physical
+synapse entry. A postsynaptic fire starts a separate learning pass. A matching
+entry whose latest arrival is no more than `WINDOW` ticks old increments by
+one and consumes that ledger record. An unpaired record older than `WINDOW`
+decrements by one on an expiry pass. Weights saturate at −128 and +127.
+
+Integration and learning walkers may be active together. If learning clears an
+entry in the same cycle that integration records a newer arrival, the newer
+arrival wins. CWR is an intentionally small pairwise causal rule; it is not
+presented as biologically complete STDP.
+
+## 7. Queue ownership and backpressure
+
+The design uses explicit ownership rather than pulse coupling:
+
+- Soma fire is a held valid/ready record.
+- A tile captures each accepted fire once into lockstep learning/fire and
+  packet records.
+- The packet payload is constructed at physical fire time, so later fires
+  cannot overwrite an in-flight packet.
+- Dendrite events remain valid with stable payload until Soma accepts them.
+- A pending learning fire retains its original physical fire tick.
+- Tick and stimulus acceptance are independently queued.
+
+Public diagnostic surfaces include `mesh_overflow_any`, `tile_overflow_any`,
+`tile_backpressure`, `tile_busy`, `tile_dend_busy`, the per-tile byte lanes of
+`spike_backpressure_count`, protocol errors and unsupported-packet witnesses.
+
+## 8. Verification and reproducibility
+
+### 8.1 Current gate matrix
+
+| Layer | Current scope | Required verdict |
+|---|---|---|
+| Golden | 55 pytest cases, including the published learning demo | all pass |
+| Cocotb | 32 tests in 9 compiled groups | all pass, nonzero tests/group |
+| Raw probes | 8 direct Icarus/vvp benches | self-check marker and rc=0 |
+| Mutation | 17 targeted RTL faults in 7 groups | every mutant killed; no stale anchor |
+| Lint | default 4×256 SoC, Verilator `-Wall` | rc=0, no emitted warnings |
+| FIFO formal | legal push/pop environment, occupancy/flags, overflow safety | BMC depth 60 PASS |
+| Router formal | legal ingress credits/routing masks, modeled egress credits, PE hold, X-first corner rule, internal overflow | BMC depth 60 PASS |
+| Synthesis | CONFIG endpoint and router GF180 mapping; default SoC coarse lowering/check | valid JSON/log receipts and hashes |
+
+The FIFO uses Yices and the router uses Bitwuzla through SymbiYosys. Formal
+reset is constrained low initially and high thereafter. FIFO data ordering is
+tested against a deque for 2,000 simulation cycles rather than encoded as an
+SMT array proof. The router proof models finite egress credits and requires
+legal upstream credit behavior. These assumptions are part of the claim.
+
+### 8.2 Mutation inventory
+
+The sweep covers FIFO full/push/count faults, router credit/fairness/X-first
+faults, CDC Gray/full faults, soma leak/refractory faults, CWR window/expiry
+faults, CONFIG commit/order/header faults, and SoC scale/axon-configuration
+faults. A timeout counts as a kill only because the injected fault prevents the
+target suite from completing inside its established limit; the process group
+is terminated and the original source is restored in `finally`.
+
+### 8.3 Reproducible inputs and receipts
+
+`requirements.in` is the human-maintained dependency set.
+`requirements-lock.txt` contains the transitive Python resolution with hashes.
+The GitHub Actions workflow pins third-party actions by full commit SHA.
+
+`tools/push_and_run.sh` synchronizes a sorted manifest of tracked and
+non-ignored new files. Remote simulation, probe, lint, mutation, formal and
+synthesis receipts record:
+
+- base Git commit;
+- SHA-256 of the working diff;
+- SHA-256 of the synchronized source manifest;
+- toolchain versions and dependency-lock hash;
+- logs/results and their SHA-256 hashes.
+
+A receipt proves only the synchronized source and named tools. A local workflow
+file does not prove that hosted CI executed it.
+
+### 8.4 Synthesis snapshot
+
+The verified build box uses Yosys `0.68+50` and the GF180 MCU 7-track 5 V
+standard-cell liberty at TT, 25 °C, 5.0 V with an ABC 20 ns target.
+
+| Artifact | Cells | Mapped cell area |
+|---|---:|---:|
+| `hypha_config_endpoint` | 271 | 10,025.48 µm² |
+| `hypha_router` | 2,535 | 91,076.65 µm² |
+| default SoC coarse front end | 55,130 | not mapped; memories retained |
+
+The whole-SoC count is a structural elaboration/lowering statistic and is not
+comparable to mapped block area.
+
+## 9. Known limits and next gates
+
+The following remain outside the v1 evidence boundary:
+
+1. replace behavioral arrays with selected physical or FPGA memory macros;
+2. prove liveness/fairness beyond bounded safety and the corner-router harness;
+3. add routed CONFIG read/response and a versioned host driver;
+4. use `hypha_sync_fifo` in a real multi-clock top-level integration;
+5. run FPGA implementation or ASIC PnR, STA, DRC/LVS and power analysis;
+6. compare CWR empirically with named reference learning rules;
+7. archive verification receipts with an immutable release revision; and
+8. independently reproduce the complete flow on a clean machine.
+
+## 10. References and provenance
+
+- W. Gerstner et al., *Neuronal Dynamics*, Cambridge University Press,
+  chapter 1.3, integrate-and-fire models.
+- J. K. Eshraghian et al., “Training Spiking Neural Networks Using Lessons
+  From Deep Learning,” *Proceedings of the IEEE* 111(9), 2023.
+- C. Frenkel et al., “A 0.086-mm² 12.7-pJ/SOP 64k-synapse 256-neuron online-
+  learning digital spiking neuromorphic processor,” *IEEE TBioCAS*, 2019.
+- C. Frenkel and G. Indiveri, “ReckOn,” ISSCC 2022.
+- `lif-tt-asic` and `ed-snn-fpga`, listed with the other audited works in
+  `NOTICE.md`.
+
+The audit informed the invariants. No third-party RTL is incorporated into
+CeliumNeUR. Exact repositories, commits, trees, license hashes, evidence files
+and line ranges are locked and independently checkable in `audit/`; source and
+license boundaries are controlled by `NOTICE.md`, not by marketing language in
+this contract.

@@ -47,10 +47,15 @@ module hyphae_mesh_2x2 (
     wire [31:0] lk_3s_to_1n_data;  wire lk_3s_to_1n_valid;
 
     wire [3:0]  r0_credit_ret, r1_credit_ret, r2_credit_ret, r3_credit_ret;
+    // Boundary-facing return bits have no physical consumer in a 2x2 mesh.
+    /* verilator lint_off UNUSEDSIGNAL */
     wire [4:0]  r0_feeder_ret, r1_feeder_ret, r2_feeder_ret, r3_feeder_ret;
+    /* verilator lint_on UNUSEDSIGNAL */
     wire [31:0] r0_pe_out_data, r1_pe_out_data, r2_pe_out_data, r3_pe_out_data;
     wire        r0_pe_out_valid, r1_pe_out_valid, r2_pe_out_valid, r3_pe_out_valid;
 
+    // Outputs facing beyond the fixed 2x2 boundary are intentionally open.
+    /* verilator lint_off PINCONNECTEMPTY */
     // -------------------- core0 (0,0): E<->1, N<->2 --------------------
     hypha_router #(.CORE_X(0), .CORE_Y(0)) r0 (
         .clk(clk), .rst_n(rst_n),
@@ -126,6 +131,7 @@ module hyphae_mesh_2x2 (
         .out_s_data (lk_3s_to_1n_data),   .out_s_valid (lk_3s_to_1n_valid),
         .overflow_any(overflow_any[3])
     );
+    /* verilator lint_on PINCONNECTEMPTY */
 
     // -------------------- credit returns across each link --------------------
     // {S,N,W,E} order per router's credit_ret_i.

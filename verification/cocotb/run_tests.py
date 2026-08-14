@@ -61,6 +61,8 @@ def main():
         (FIFO_SOURCES, "hypha_link_fifo", "fifo_test", None),
         (ROUTER_SOURCES, "hypha_router", "router_test", None),
         ([RTL / "hypha_sync_fifo.v"], "hypha_sync_fifo", "sync_fifo_test", None),
+        ([ROOT / "rtl" / "top" / "hypha_config_endpoint.v"],
+         "hypha_config_endpoint", "config_endpoint_test", None),
         ([ROOT / "rtl" / "soma" / "soma_core.v"], "soma_core", "soma_test", None),
         (MESH_SOURCES, "hyphae_mesh_2x2", "mesh_test", None),
         (BOTH_TILE, "neuro_tile", "dendrite_test", None),
@@ -70,6 +72,7 @@ def main():
           ROOT / "rtl" / "soma" / "neuro_tile.v",
           RTL / "hypha_link_fifo.v", RTL / "hypha_router.v",
           ROOT / "rtl" / "top" / "hyphae_mesh_2x2.v",
+          ROOT / "rtl" / "top" / "hypha_config_endpoint.v",
           ROOT / "rtl" / "top" / "celiumneur_soc.v"], "celiumneur_soc", "soc_test", None),
     ):
         if only and toplevel != only:
@@ -112,6 +115,7 @@ def run_probes(runner, only):
             srcs = [str(tb), str(RTL / "hypha_sync_fifo.v")]
         elif name == "soc_probe_tb":
             srcs = [str(tb), str(ROOT / "rtl/top/celiumneur_soc.v"),
+                    str(ROOT / "rtl/top/hypha_config_endpoint.v"),
                     str(ROOT / "rtl/top/hyphae_mesh_2x2.v"),
                     str(RTL / "hypha_router.v"), str(RTL / "hypha_link_fifo.v"),
                     str(ROOT / "rtl/soma/neuro_tile.v"),
@@ -134,11 +138,13 @@ def run_probes(runner, only):
         rp = subprocess.run(["vvp", str(out)], capture_output=True, text=True,
                             timeout=180)
         tail = [ln for ln in rp.stdout.splitlines() if ln.strip()]
-        marker = tail[-1] if tail else "(empty output)"
+        pass_lines = [ln for ln in tail if "-PASS" in ln]
+        marker = pass_lines[-1] if pass_lines else (tail[-1] if tail else "(empty output)")
         if rp.returncode == 0:
             print(f"[PASS] probe {name} :: {marker}")
         else:
-            print(f"[FAIL] probe {name}: {rp.stderr.strip()[:160]}")
+            detail = (tail[-1] if tail else rp.stderr.strip())[:240]
+            print(f"[FAIL] probe {name}: {detail}")
             return 1
     return 0
 

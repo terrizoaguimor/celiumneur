@@ -1,249 +1,260 @@
-// soma_dendrite.v — CeliumNeUR dendrite + plasticity snooper (SPEC §5, I2+I4).
+// soma_dendrite.v — concurrent dendrite expansion + CWR learning engine.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Duties:
-//   1. I2 (indirection): an arriving spike carries a PRESYNAPTIC global id;
-//      the syn_table expands it to local (neuron, weight) deliveries. Topology
-//      lives in the syn_table, never in wiring or memory geometry.
-//   2. I4 (plasticity): rule v1.2 from golden/plasticity.py, in RTL:
-//        arrival at entry e     -> ledger[e] := tick_now, valid (and nothing else)
-//        fire(post_local = L)   -> every valid entry with post==L and
-//                                  (tick - ledger) <= WINDOW: w+1, then clear
-//        tick boundary          -> every valid entry with (tick - ledger) >
-//                                  WINDOW: w-1 (clamp), then clear
-//      Snoop taps (fire strobe, tick) are level-audited each cycle; a fire or
-//      tick mid-pass is queued, never lost. A new spike while busy is held
-//      in spk_pending — there is no drop path in this module (I1).
+// Two independent walkers share the explicit synapse table:
+//   - integration scans one accepted presynaptic GID and emits soma events;
+//   - learning applies CWR potentiation/expiry passes in the background.
 //
-// Ledger constraint v1: ONE arrival record per entry (the latest arrival
-// overwrites). The golden referee models the same, so the contract is exact.
-//
-// syn_table: 16 entries {valid, pre_gid[9:0], post_local[1:0], weight[7:0]s}
-// as a register file; cfg_* writes, rb_* reads (I5: never write-only).
+// The walkers may inspect the same entry in one cycle. If a new arrival and
+// a learning clear target that entry together, the new arrival wins: it
+// occurred after the fire/tick snapshot owned by the learning pass and must
+// remain available for the next causal window.
 
 `default_nettype none
 
 module soma_dendrite #(
     parameter ENTRIES   = 16,
+    parameter ENTRY_ADDR_BITS = 4,
     parameter TICK_BITS = 10,
     parameter WINDOW    = 3
 ) (
     input  wire        clk,
     input  wire        rst_n,
 
-    // Arriving spike (pre-expanded presynaptic global id).
+    // Presynaptic input transaction.
     input  wire        spk_valid,
     input  wire [9:0]  spk_gid,
-    output wire        dend_busy,      // high while a pass runs; new spikes
-                                       // are latched, not lost
+    output wire        spk_ready,
+    output wire        dend_busy,
+    output wire        scan_busy,
+    output wire        learn_busy,
 
-    // Fanout toward the soma engine.
+    // Expanded event transaction toward SomaCore.
     output reg         ev_valid,
     input  wire        ev_ready,
     output reg  [7:0]  ev_neuron,
-    output reg  [7:0]  ev_weight,      // contents of the syn_table slot (signed)
+    output reg  [7:0]  ev_weight,
 
-    // Snoop taps from the soma engine: LEVEL interface on the fire FIFO.
-    // fire_valid means "there is a pending postsynaptic fire"; fire_taken is
-    // the one-cycle strobe the queue pops on (the pass consumed this one).
-    input  wire        fire_valid,
-    input  wire [7:0]  fire_neuron,
-    output wire        fire_taken,
+    // Pending postsynaptic fire. fire_tick is captured at the physical fire,
+    // not when this walker eventually reaches the record.
+    input  wire                 fire_valid,
+    input  wire [7:0]           fire_neuron,
+    input  wire [TICK_BITS-1:0] fire_tick,
+    output wire                 fire_taken,
+
+    // Accepted global tick. One later tick may queue behind an active pass.
     input  wire        tick_strobe,
+    output wire        tick_ready,
 
-    // Host config + readback (I5).
+    // Host configuration and asynchronous table readback.
     input  wire        cfg_en,
-    input  wire [4:0]  cfg_addr,
-    input  wire [20:0] cfg_wdata,
-    input  wire [4:0]  rb_addr,
-    output wire [20:0] rb_rdata
+    input  wire [ENTRY_ADDR_BITS-1:0] cfg_addr,
+    input  wire [26:0] cfg_wdata,
+    output wire        cfg_ready,
+    input  wire [ENTRY_ADDR_BITS-1:0] rb_addr,
+    output wire [26:0] rb_rdata
 );
 
-    // layout: [20] valid | [19:10] pre_gid | [9:8] post_local | [7:0] weight
-    reg [20:0] syn_table [0:ENTRIES-1];
-
-    reg [TICK_BITS-1:0] ledger_tick  [0:ENTRIES-1];
+    // layout: valid | pre_gid[9:0] | post_local[7:0] | signed weight[7:0]
+    reg [26:0] syn_table [0:ENTRIES-1];
+    reg [TICK_BITS-1:0] ledger_tick [0:ENTRIES-1];
     reg                 ledger_valid [0:ENTRIES-1];
     reg [TICK_BITS-1:0] tick_cnt;
-
-    reg        spk_pending;
-    reg [9:0]  pending_gid;
 
     function [7:0] w_plus1;
         input [7:0] w;
         begin
-            w_plus1 = ($signed(w) >= 8'sd127) ? 8'sd127 : w + 8'sd1;
+            w_plus1 = (w == 8'h7f) ? 8'h7f : w + 8'd1;
         end
     endfunction
+
     function [7:0] w_minus1;
         input [7:0] w;
         begin
-            w_minus1 = ($signed(w) <= -8'sd128) ? 8'sd128 : w - 8'sd1;
+            w_minus1 = (w == 8'h80) ? 8'h80 : w - 8'd1;
         end
     endfunction
 
-    localparam [2:0] S_IDLE = 3'd0,
-                     S_SCAN = 3'd1,   // fanout pass over the syn_table
-                     S_POT  = 3'd2,   // LTP pay pass after a fire
-                     S_EXP  = 3'd3;   // LTD expiry pass at a tick boundary
+    // Integration walker.
+    reg       scan_active;
+    reg [ENTRY_ADDR_BITS:0] scan_i;
+    reg [9:0] active_gid;
 
-    reg [2:0] state;
-    reg [4:0] scan_i;
-    reg [9:0] active_gid;   // gid latched when the scan started (spk_valid
-                            // drops one cycle later; scanning must not read air)
-    reg [7:0] fire_neuron_r;
-    reg       fire_taken_r;
-    reg       tick_queued;
+    // Learning walker.
+    localparam [1:0] L_IDLE = 2'd0,
+                     L_POT  = 2'd1,
+                     L_EXP  = 2'd2;
+    reg [1:0] learn_state;
+    reg [ENTRY_ADDR_BITS:0] learn_i;
+    reg [7:0] learn_post_neuron;
+    reg [TICK_BITS-1:0] learn_fire_tick;
+    reg [TICK_BITS-1:0] learn_expiry_tick;
+    reg tick_pending;
+    reg fire_taken_r;
 
-    assign rb_rdata  = syn_table[rb_addr];
-    assign dend_busy = (state != S_IDLE) || spk_pending;
+    // Diagnostic compatibility for raw probes: 0 idle, 1 scan, 2 POT, 3 EXP.
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [2:0] state = scan_active ? 3'd1
+                     : (learn_state == L_POT) ? 3'd2
+                     : (learn_state == L_EXP) ? 3'd3 : 3'd0;
+    /* verilator lint_on UNUSEDSIGNAL */
+
+    assign rb_rdata = syn_table[rb_addr];
+    assign scan_busy = scan_active;
+    assign learn_busy = (learn_state != L_IDLE);
+    assign dend_busy = scan_active || learn_busy || tick_pending;
     assign fire_taken = fire_taken_r;
 
-    integer wi;
+    // Configuration owns a quiescent table boundary. Integration remains
+    // available during learning; that independence is the I4 contract.
+    assign cfg_ready = !scan_active && (learn_state == L_IDLE)
+                     && !tick_pending && !fire_valid;
+    assign spk_ready = !scan_active && !(cfg_en && cfg_ready);
+    assign tick_ready = !tick_pending;
 
+    integer wi;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state              <= S_IDLE;
-            scan_i             <= 5'd0;
-            tick_cnt           <= {TICK_BITS{1'b0}};
-            ev_valid           <= 1'b0;
-            ev_neuron          <= 8'd0;
-            ev_weight          <= 8'd0;
-            spk_pending        <= 1'b0;
-            pending_gid        <= 10'd0;
-            active_gid         <= 10'h0;
-            fire_neuron_r      <= 8'd0;
-            fire_taken_r       <= 1'b0;
-            tick_queued        <= 1'b0;
+            scan_active       <= 1'b0;
+            scan_i            <= {(ENTRY_ADDR_BITS+1){1'b0}};
+            active_gid        <= 10'd0;
+            ev_valid          <= 1'b0;
+            ev_neuron         <= 8'd0;
+            ev_weight         <= 8'd0;
+            learn_state       <= L_IDLE;
+            learn_i           <= {(ENTRY_ADDR_BITS+1){1'b0}};
+            learn_post_neuron <= 8'd0;
+            learn_fire_tick   <= {TICK_BITS{1'b0}};
+            learn_expiry_tick <= {TICK_BITS{1'b0}};
+            tick_pending      <= 1'b0;
+            tick_cnt          <= {TICK_BITS{1'b0}};
+            fire_taken_r      <= 1'b0;
             for (wi = 0; wi < ENTRIES; wi = wi + 1) begin
-                syn_table[wi]        <= 21'b0;
+                syn_table[wi]    <= 27'd0;
                 ledger_tick[wi]  <= {TICK_BITS{1'b0}};
                 ledger_valid[wi] <= 1'b0;
             end
         end else begin
-            // -------- level taps: fire/tick/new-spike are NEVER lost --------
-            if (spk_valid) begin
-                if (state == S_IDLE && !spk_pending)
-                    spk_pending <= 1'b0;      // consumed in the case below
-                else begin
-                    spk_pending <= 1'b1;
-                    pending_gid <= spk_gid;
-                end
-            end
-            // fire taps are LEVEL now: pending is physical, consumption is
-            // the fire_taken strobe (see state transitions below). Nothing
-            // here but the default down-tick of the strobe.
             fire_taken_r <= 1'b0;
-            if (tick_strobe)
-                tick_queued <= 1'b1;
 
-            // --------------------------- FSM -----------------------------
-            case (state)
-                S_IDLE: begin
-                    ev_valid <= 1'b0;
-                    if (cfg_en) begin
-                        syn_table[cfg_addr] <= cfg_wdata;
-                    end else if (spk_valid || spk_pending) begin
-                        scan_i     <= 5'd0;
-                        active_gid <= spk_pending ? pending_gid : spk_gid;
-                        if (spk_pending) spk_pending <= 1'b0;
-                        state <= S_SCAN;
-                    end else if (fire_valid) begin
-                        // consume the queued head into this POT pass
-                        fire_neuron_r <= fire_neuron;
-                        fire_taken_r  <= 1'b1;
-                        scan_i        <= 5'd0;
-                        state         <= S_POT;
-                    end else if (tick_queued) begin
-                        tick_queued <= 1'b0;
-                        tick_cnt    <= tick_cnt + 1'b1;
-                        scan_i      <= 5'd0;
-                        state       <= S_EXP;
+            if (tick_strobe && tick_ready) begin
+                tick_cnt     <= tick_cnt + {{(TICK_BITS-1){1'b0}}, 1'b1};
+                tick_pending <= 1'b1;
+            end
+
+            if (cfg_en && cfg_ready)
+                syn_table[cfg_addr] <= cfg_wdata;
+
+            // ---------------- learning walker --------------------------
+            case (learn_state)
+                L_IDLE: begin
+                    learn_i <= {(ENTRY_ADDR_BITS+1){1'b0}};
+                    if (fire_valid) begin
+                        learn_post_neuron <= fire_neuron;
+                        learn_fire_tick   <= fire_tick;
+                        fire_taken_r      <= 1'b1;
+                        learn_state       <= L_POT;
+                    end else if (tick_pending) begin
+                        tick_pending      <= 1'b0;
+                        learn_expiry_tick <= tick_cnt;
+                        learn_state       <= L_EXP;
                     end
                 end
 
-                S_SCAN: begin
-                    if (scan_i < ENTRIES) begin
-                        if (syn_table[scan_i][20]
-                            && syn_table[scan_i][19:10] == active_gid) begin
-                            if (!ev_valid) begin
-                                ev_valid  <= 1'b1;
-                                ev_neuron <= {6'b0, syn_table[scan_i][9:8]};
-                                ev_weight <= syn_table[scan_i][7:0];
-                            end else if (ev_ready) begin
-                                // delivered: stamp the ledger with now
-                                ev_valid              <= 1'b0;
-                                ledger_tick[scan_i]   <= tick_cnt;
-                                ledger_valid[scan_i]  <= 1'b1;
-                                scan_i                <= scan_i + 5'd1;
-                            end
-                        end else begin
-                            scan_i <= scan_i + 5'd1;
+                L_POT: begin
+                    if (learn_i < ENTRIES) begin
+                        if (syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][26]
+                            && syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][15:8]
+                               == learn_post_neuron
+                            && ledger_valid[learn_i[ENTRY_ADDR_BITS-1:0]]
+                            && (learn_fire_tick
+                                - ledger_tick[learn_i[ENTRY_ADDR_BITS-1:0]])
+                               <= WINDOW) begin
+                            syn_table[learn_i[ENTRY_ADDR_BITS-1:0]] <= {
+                                syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][26:8],
+                                w_plus1(syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][7:0])
+                            };
+                            ledger_valid[learn_i[ENTRY_ADDR_BITS-1:0]] <= 1'b0;
                         end
+                        learn_i <= learn_i + {{ENTRY_ADDR_BITS{1'b0}}, 1'b1};
                     end else begin
-                        ev_valid <= 1'b0;
-                        scan_i   <= 5'd0;
+                        learn_i <= {(ENTRY_ADDR_BITS+1){1'b0}};
+                        if (tick_pending) begin
+                            tick_pending      <= 1'b0;
+                            learn_expiry_tick <= tick_cnt;
+                            learn_state       <= L_EXP;
+                        end else begin
+                            learn_state <= L_IDLE;
+                        end
+                    end
+                end
+
+                L_EXP: begin
+                    if (learn_i < ENTRIES) begin
+                        if (syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][26]
+                            && ledger_valid[learn_i[ENTRY_ADDR_BITS-1:0]]
+                            && (learn_expiry_tick
+                                - ledger_tick[learn_i[ENTRY_ADDR_BITS-1:0]])
+                               > WINDOW) begin
+                            syn_table[learn_i[ENTRY_ADDR_BITS-1:0]] <= {
+                                syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][26:8],
+                                w_minus1(syn_table[learn_i[ENTRY_ADDR_BITS-1:0]][7:0])
+                            };
+                            ledger_valid[learn_i[ENTRY_ADDR_BITS-1:0]] <= 1'b0;
+                        end
+                        learn_i <= learn_i + {{ENTRY_ADDR_BITS{1'b0}}, 1'b1};
+                    end else begin
+                        learn_i <= {(ENTRY_ADDR_BITS+1){1'b0}};
                         if (fire_valid) begin
-                            fire_neuron_r <= fire_neuron;
-                            fire_taken_r  <= 1'b1;
-                            state         <= S_POT;
-                        end else if (tick_queued) begin
-                            tick_queued <= 1'b0;
-                            tick_cnt    <= tick_cnt + 1'b1;
-                            state       <= S_EXP;
+                            learn_post_neuron <= fire_neuron;
+                            learn_fire_tick   <= fire_tick;
+                            fire_taken_r      <= 1'b1;
+                            learn_state       <= L_POT;
+                        end else if (tick_pending) begin
+                            tick_pending      <= 1'b0;
+                            learn_expiry_tick <= tick_cnt;
+                            learn_state       <= L_EXP;
                         end else begin
-                            state <= S_IDLE;
+                            learn_state <= L_IDLE;
                         end
                     end
                 end
 
-                S_POT: begin
-                    if (scan_i < ENTRIES) begin
-                        if (syn_table[scan_i][20]
-                            && syn_table[scan_i][9:8] == fire_neuron_r[1:0]
-                            && ledger_valid[scan_i]
-                            && (tick_cnt - ledger_tick[scan_i]) <= WINDOW) begin
-                            syn_table[scan_i]       <= {syn_table[scan_i][20:8],
-                                                    w_plus1(syn_table[scan_i][7:0])};
-                            ledger_valid[scan_i] <= 1'b0;
-                        end
-                        scan_i <= scan_i + 5'd1;
-                    end else begin
-                        // after paying, run the expiry pass so unpaid entries
-                        // age correctly even outside a tick (keeps the bench's
-                        // golden single-pass traversal exact)
-                        state  <= S_EXP;
-                        scan_i <= 5'd0;
-                    end
-                end
-
-                S_EXP: begin
-                    if (scan_i < ENTRIES) begin
-                        if (syn_table[scan_i][20] && ledger_valid[scan_i]
-                            && (tick_cnt - ledger_tick[scan_i]) > WINDOW) begin
-                            syn_table[scan_i]       <= {syn_table[scan_i][20:8],
-                                                    w_minus1(syn_table[scan_i][7:0])};
-                            ledger_valid[scan_i] <= 1'b0;
-                        end
-                        scan_i <= scan_i + 5'd1;
-                    end else begin
-                        scan_i <= 5'd0;
-                        if (fire_valid) begin
-                            fire_neuron_r <= fire_neuron;
-                            fire_taken_r  <= 1'b1;
-                            state         <= S_POT;
-                        end else if (tick_queued) begin
-                            tick_queued <= 1'b0;
-                            tick_cnt    <= tick_cnt + 1'b1;
-                            state       <= S_EXP;
-                        end else begin
-                            state <= S_IDLE;
-                        end
-                    end
-                end
-
-                default: state <= S_IDLE;
+                default: learn_state <= L_IDLE;
             endcase
+
+            // ---------------- integration walker -----------------------
+            // This block intentionally follows the learning block. A new
+            // arrival therefore wins a same-entry ledger clear.
+            if (!scan_active) begin
+                ev_valid <= 1'b0;
+                if (spk_valid && spk_ready) begin
+                    active_gid  <= spk_gid;
+                    scan_i      <= {(ENTRY_ADDR_BITS+1){1'b0}};
+                    scan_active <= 1'b1;
+                end
+            end else if (scan_i < ENTRIES) begin
+                if (syn_table[scan_i[ENTRY_ADDR_BITS-1:0]][26]
+                    && syn_table[scan_i[ENTRY_ADDR_BITS-1:0]][25:16]
+                       == active_gid) begin
+                    if (!ev_valid) begin
+                        ev_valid  <= 1'b1;
+                        ev_neuron <= syn_table[scan_i[ENTRY_ADDR_BITS-1:0]][15:8];
+                        ev_weight <= syn_table[scan_i[ENTRY_ADDR_BITS-1:0]][7:0];
+                    end else if (ev_ready) begin
+                        ev_valid             <= 1'b0;
+                        ledger_tick[scan_i[ENTRY_ADDR_BITS-1:0]]  <= tick_cnt;
+                        ledger_valid[scan_i[ENTRY_ADDR_BITS-1:0]] <= 1'b1;
+                        scan_i <= scan_i + {{ENTRY_ADDR_BITS{1'b0}}, 1'b1};
+                    end
+                end else begin
+                    scan_i <= scan_i + {{ENTRY_ADDR_BITS{1'b0}}, 1'b1};
+                end
+            end else begin
+                scan_active <= 1'b0;
+                scan_i      <= {(ENTRY_ADDR_BITS+1){1'b0}};
+                ev_valid    <= 1'b0;
+            end
         end
     end
 

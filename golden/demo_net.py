@@ -5,33 +5,34 @@ A two-input temporal coincidence detector (an AND gate built from leak +
 threshold + refractory — the "look, a chip" moment, with dynamics you can
 SEE on the raster):
 
-    electrode n0 (core0) ──120──┐
-                                 ├── n8 (core2, theta=200, leak fast)
-    electrode n4 (core1) ──120──┘            │
+    electrode n0   (core0) ──120──┐
+                                    ├── n512 (core2, theta=200, leak fast)
+    electrode n256 (core1) ──120──┘             │
                                        150   ▼
-                                     n12 (core3, theta=100, refractory=4)
+                                     n768 (core3, theta=100, refractory=4)
 
 - Electrodes are dumb relays: theta=100, a 120 jolt fires them once.
-- n8 needs BOTH inputs within a short window: a lone 120 leaks below theta
+- The detector needs BOTH inputs within a short window: a lone 120 leaks below theta
   before a second can arrive (visible on the raster as decay toward zero).
-- When n8 fires, n12 integrates 150 > 100 and fires; its 4-tick refractory
+- When the detector fires, the output integrates 120 > 100 and fires; its 4-tick refractory
   then visibly blocks the immediate re-pair's echo.
 
 Hand-derived schedule (asserted by the test; derived from the golden
 advance_time semantics, which come from Gerstner Ch.1.3 arithmetic):
-  pair at phase P   -> n8 fires at P (drain step; theta 200, two x 120 = 240)
-  n8 fire           -> n12 fires next tick (drain delivers 150 > 100)
-  immediate re-pair -> n8 fires again; n12's refractory (4) blocks it.
+  pair at phase P   -> detector fires at P (two x 120 = 240)
+  detector fire     -> output fires next tick (120 > 100)
+  immediate re-pair -> detector fires again; output refractory blocks it.
 
 No novelty claimed: mechanism-level demo of published LIF arithmetic.
 """
 
 from soma import NeuronParams
-from golden_net import GLOBAL_NEURONS, NeuroSandbox
+from golden_net import GLOBAL_NEURONS, NEURONS_PER_CORE, NeuroSandbox
 
-ELECTRODE_A, ELECTRODE_B = 0, 4
-DETECTOR = 8
-OUTPUT = 12
+ELECTRODE_A = 0
+ELECTRODE_B = NEURONS_PER_CORE
+DETECTOR = 2 * NEURONS_PER_CORE
+OUTPUT = 3 * NEURONS_PER_CORE
 PAIR_WEIGHT = 120
 OUT_WEIGHT = 120   # synaptic weights are 8-bit signed by SPEC: 150 is illegal
 
@@ -60,17 +61,17 @@ def build_demo() -> NeuroSandbox:
 def run_demo_script(box: NeuroSandbox) -> None:
     """Staged stimulus: lone, lone, pair, then a refractory-collision pair."""
     box.stimulate(ELECTRODE_A, PAIR_WEIGHT)     # lone a
-    box.tick()                                  # t0: n8 integrates 120
+    box.tick()                                  # t0: detector integrates 120
     box.tick()                                  # t1: leak decays it
     box.stimulate(ELECTRODE_B, PAIR_WEIGHT)     # lone b
     box.tick()                                  # t2: integrates, decays
     box.tick()                                  # t3
     box.stimulate(ELECTRODE_A, PAIR_WEIGHT)     # pair in one phase
     box.stimulate(ELECTRODE_B, PAIR_WEIGHT)
-    box.tick()                                  # t4: n8 fires; n12 staged
-    box.tick()                                  # t5: n12 fires, refractory loads
+    box.tick()                                  # t4: detector fires; output staged
+    box.tick()                                  # t5: output fires, refractory loads
     box.stimulate(ELECTRODE_A, PAIR_WEIGHT)     # immediate re-pair
     box.stimulate(ELECTRODE_B, PAIR_WEIGHT)
-    box.tick()                                  # t6: n8 fires; n12 still refractory
-    box.tick()                                  # t7: 120 lands on gated n12 — blocked
+    box.tick()                                  # t6: detector fires; output still refractory
+    box.tick()                                  # t7: 120 lands on gated output — blocked
     box.tick()                                  # t8: refractory winds down

@@ -42,7 +42,7 @@ module sync_fifo_smoke_tb;
             pop <= 1;
             if (pop_data !== next_expected) begin
                 $display("ORDER-ERROR got=%0d expected=%0d t=%0t", pop_data, next_expected, $time);
-                $finish;
+                $finish_and_return(1);
             end
             next_expected <= next_expected + 1;
             got <= got + 1;
@@ -59,7 +59,7 @@ module sync_fifo_smoke_tb;
         pop_rst_n = 1;
         #20000;
         $display("TIMEOUT sent=%0d got=%0d", sent, got);
-        $finish;
+        $finish_and_return(1);
     end
 
     always @(posedge push_clk) begin

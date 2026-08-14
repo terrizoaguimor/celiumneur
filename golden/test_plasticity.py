@@ -2,11 +2,13 @@
 """Tests for the golden plasticity rule (CWR, causal-window form):
 every property here is contractual for the RTL snooper."""
 
-from plasticity import PairSTDP, WEIGHT_RAIL_HI, WEIGHT_RAIL_LO
+from plasticity import CausalWindowRule, WEIGHT_RAIL_HI, WEIGHT_RAIL_LO
+from demo_net import build_demo
+from demo_plasticity import run_plasticity_demo
 
 
 def fresh_rule(window=3):
-    return PairSTDP(window_ticks=window)
+    return CausalWindowRule(window_ticks=window)
 
 
 def test_fire_pays_recent_arrival_ltp():
@@ -49,3 +51,9 @@ def test_storm_never_leaves_rails():
     for _ in range(2000):
         w = rule.potentiate(rule.on_expiry(w))
         assert WEIGHT_RAIL_LO <= w <= WEIGHT_RAIL_HI
+
+
+def test_published_demo_separates_paired_and_control_trajectories():
+    trajectory = run_plasticity_demo(build_demo())
+    assert trajectory["paired"][-1] > trajectory["paired"][0]
+    assert trajectory["control"][-1] < trajectory["control"][0]

@@ -21,16 +21,12 @@ WEIGHT_RAIL_HI = 127
 WEIGHT_RAIL_LO = -128
 WINDOW_TICKS_DEFAULT = 3
 
-WEIGHT_RAIL_HI = 127
-WEIGHT_RAIL_LO = -128
-WINDOW_TICKS_DEFAULT = 3
-
 
 def clamp_weight(w: int) -> int:
     return max(WEIGHT_RAIL_LO, min(WEIGHT_RAIL_HI, w))
 
 
-class PairSTDP:
+class CausalWindowRule:
     def __init__(self, window_ticks: int = WINDOW_TICKS_DEFAULT) -> None:
         self.window = window_ticks
         self.last_fire_tick: dict[int, int] = {}   # post gid -> tick

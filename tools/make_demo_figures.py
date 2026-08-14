@@ -23,11 +23,22 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "golden"))
 
-from demo_net import build_demo, run_demo_script          # noqa: E402
+from demo_net import (                                      # noqa: E402
+    build_demo,
+    run_demo_script,
+    ELECTRODE_A,
+    ELECTRODE_B,
+    DETECTOR,
+    OUTPUT,
+)
 from demo_plasticity import run_plasticity_demo           # noqa: E402
 
-LABELS = [(0, "n0 electr A"), (4, "n4 electr B"), (8, "n8 detector"),
-          (12, "n12 SALIDA")]
+LABELS = [
+    (ELECTRODE_A, f"n{ELECTRODE_A} electrode A"),
+    (ELECTRODE_B, f"n{ELECTRODE_B} electrode B"),
+    (DETECTOR, f"n{DETECTOR} detector"),
+    (OUTPUT, f"n{OUTPUT} output"),
+]
 
 
 def raster_panel(ax, events, title):
@@ -55,6 +66,15 @@ def fig_raster_compare():
         # celiumneur_soc` first. Never ship an invented chip trace.
         raise SystemExit("chip_fires.json not found — run the soc bench first")
 
+    golden_multiset = sorted(gid for _tick, gid in golden_events)
+    chip_multiset = sorted(gid for _tick, gid in chip_events)
+    print("golden multiset:", golden_multiset)
+    print("chip   multiset:", chip_multiset)
+    if golden_multiset != chip_multiset:
+        raise SystemExit(
+            "refusing to overwrite the raster: RTL and golden multisets differ"
+        )
+
     fig, axes = plt.subplots(2, 1, figsize=(11, 5.6), sharex=True)
     raster_panel(axes[0], golden_events, "GOLDEN sandbox fire_log")
     raster_panel(axes[1], chip_events, "CELIUMNEUR chip (RTL SoC) fire_log")
@@ -63,22 +83,17 @@ def fig_raster_compare():
     out = ROOT / "golden" / "demo_raster_compare.png"
     fig.savefig(out, dpi=130)
     print(f"wrote {out}")
-    gs = sorted(g for _, g in golden_events)
-    cs = sorted(g for _, g in chip_events)
-    print("golden multiset:", gs)
-    print("chip   multiset:", cs)
-    assert gs == cs, "raster twins must be multiset-equal (soc_test asserts this)"
     print("raster twin multisets EQUAL")
 
 
 def fig_plasticity():
     box = build_demo()
     traj = run_plasticity_demo(box)
-    rounds = range(len(traj["A->8"]))
+    rounds = range(len(traj["paired"]))
     fig, ax = plt.subplots(figsize=(9, 4.6))
-    ax.plot(rounds, traj["A->8"], "-o", ms=3.5, lw=1.6, color="#0b8043",
+    ax.plot(rounds, traj["paired"], "-o", ms=3.5, lw=1.6, color="#0b8043",
             label="A→detector (paired every round) — LTP")
-    ax.plot(rounds, traj["C->8"], "-s", ms=3.5, lw=1.6, color="#b3261e",
+    ax.plot(rounds, traj["control"], "-s", ms=3.5, lw=1.6, color="#b3261e",
             label="C→detector (never paired) — LTD")
     ax.axhline(127, color="#0b8043", ls=":", lw=1, alpha=0.5)
     ax.axhline(-127, color="#b3261e", ls=":", lw=1, alpha=0.5)
@@ -94,10 +109,10 @@ def fig_plasticity():
     fig.tight_layout()
     out = ROOT / "render" / "plasticity_trajectory.png"
     fig.savefig(out, dpi=140)
-    print(f"wrote {out}  A->8: {traj['A->8'][0]}..{traj['A->8'][-1]}  "
-          f"C->8: {traj['C->8'][0]}..{traj['C->8'][-1]}")
-    assert traj["A->8"][-1] > traj["A->8"][0]
-    assert traj["C->8"][-1] < traj["C->8"][0]
+    print(f"wrote {out}  paired: {traj['paired'][0]}..{traj['paired'][-1]}  "
+          f"control: {traj['control'][0]}..{traj['control'][-1]}")
+    assert traj["paired"][-1] > traj["paired"][0]
+    assert traj["control"][-1] < traj["control"][0]
 
 
 if __name__ == "__main__":

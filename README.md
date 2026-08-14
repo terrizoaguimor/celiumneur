@@ -1,166 +1,199 @@
 # CeliumNeUR
 
-**The chip that has no secrets.**
+**A transparent, verification-first neuromorphic SoC in synthesizable Verilog.**
 
 [![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSES/AGPL-3.0.txt)
 [![Docs & artwork: CC BY 4.0](https://img.shields.io/badge/docs%20%2B%20artwork-CC%20BY%204.0-lightgrey.svg)](LICENSES/CC-BY-4.0.txt)
-[![golden pytest: 53/53](https://img.shields.io/badge/golden%20pytest-53%2F53-brightgreen)](#quickstart)
-[![cocotb suite: 8/8 groups](https://img.shields.io/badge/cocotb%20suite-8%2F8%20groups-brightgreen)](#quickstart)
-[![vvp probes: 8/8](https://img.shields.io/badge/vvp%20probes-8%2F8-brightgreen)](#quickstart)
+[![Release: v0.0.2](https://img.shields.io/badge/release-v0.0.2-6f42c1.svg)](https://github.com/terrizoaguimor/celiumneur/releases/tag/v0.0.2)
+[![Golden tests: 55](https://img.shields.io/badge/golden%20tests-55-brightgreen)](#verification)
+[![Cocotb tests: 32](https://img.shields.io/badge/cocotb%20tests-32-brightgreen)](#verification)
+[![Mutants killed: 17/17](https://img.shields.io/badge/mutants-17%2F17-brightgreen)](#verification)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21925426.svg)](https://doi.org/10.5281/zenodo.21925426)
-[![Verilog 2001](https://img.shields.io/badge/Verilog-2001-blueviolet)](rtl/)
-[![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A5%203.11-yellow)](#quickstart)
 
-A verification-first neuromorphic SoC v1: four event-driven neuro_tiles on a
-2×2 credit-based fabric, built against a structural audit of published open
-RTL, verified per-invariant by golden-model parity, cocotb simulation, formal
-bounded checking, and mutation-killing gates.
+CeliumNeUR combines four 256-neuron tiles with a 2×2 credit-based Hyphae
+mesh. The default SoC therefore implements 1,024 addressable neuron states,
+1,024 addressable synapse entries, routed spike and configuration traffic,
+concurrent causal-window learning, and live state readback.
 
-![CeliumNeUR SoC v1 — top view](render/html/still.png)
+The central engineering rule is precise: when every producer obeys the
+published `valid/ready` contract, an accepted spike is either buffered,
+processed, or held under backpressure. It is never silently overwritten or
+discarded. Sticky witnesses and counters expose malformed traffic and pressure
+events instead of hiding them.
 
----
+![Conceptual CeliumNeUR die visualization](render/celiumneur_die_concept_v0.0.2.png)
 
-## Why this exists
+*Concept visualization generated with GPT Image 2 from the verified RTL
+topology and published neuromorphic-chip floorplan conventions. It is not a
+die micrograph, post-layout floorplan, or fabricated silicon. See the
+[image provenance record](render/IMAGE_PROVENANCE.md).*
 
-Every open neuromorphic chip we audited (ODIN, ReckOn, comparable
-accelerators, a TinyTapeout SNN) carries at least one silent-drop,
-stale-learning, or clock-crossing pathology in its ship-visible RTL
-(evidence in `SPEC.md`, invariants I1–I8). CeliumNeUR is the answer built
-the other way around: invariants first, then silicon.
+![CeliumNeUR SoC architecture](render/architecture_block.png)
 
-**The three legs of the claim:**
+## What is implemented
 
-| Leg | Meaning | Where the proof lives |
-|---|---|---|
-| **Transparent (I5)** | every thought readable without halting the chip | `golden/` raster twins + readback path |
-| **Cannot drop a spike (I1)** | credit-based end-to-end; no drop path exists anywhere | formal BMC-60 over the fabric, shadow-audit per test |
-| **Learns without stopping (I4)** | concurrent plasticity snoops the fabric; the network keeps listening while it adapts | trajectory on `golden/demo_plasticity.py` vs RTL paired trajectory per round |
+| Surface | Current implementation |
+|---|---|
+| Scale | 4 tiles × 256 neurons; GID range 0–1023 |
+| Fabric | 2×2 X–Y mesh, multicast branch replication, per-link credits |
+| Neuron | Time-multiplexed fixed-point LIF with saturating arithmetic |
+| Synapses | 256-entry indirection table per tile, signed 8-bit weights |
+| Learning | Concurrent CWR integration/learning walkers, ±127/−128 saturation |
+| Configuration | Routed five-flit CONFIG transaction; no host register-write sideband |
+| Readback | Independent soma and dendrite read paths while computation continues |
+| Diagnostics | Overflow, backpressure, busy, malformed-protocol and unsupported-packet witnesses |
 
----
+The design is simulation- and synthesis-validated RTL. It is **not** a placed
+and routed ASIC, an FPGA bitstream, a timing-closed implementation, or silicon.
+The GF180 results are pre-PnR baselines and must not be read as tapeout metrics.
 
-## Quickstart
+## Architecture
 
-**Environment (the easy way, no tapeout software):** Python 3.11+, a
-system `iverilog` (Icarus >= 12 or OSS CAD Suite), and cocotb >= 2.0.
+Each `neuro_tile` contains:
+
+- a `soma_core` serving 256 independent 64-bit neuron words;
+- a `soma_dendrite` with 256 configurable synapse entries;
+- independent integration and learning walkers;
+- stimulus, inbound-spike, fire-record, packet and egress queues;
+- a 4-bit per-neuron axon destination table; and
+- a routed `hypha_config_endpoint` at the tile boundary.
+
+The SoC accepts global ticks through an eight-token FIFO and dispatches each
+accepted tick atomically when all four tiles are ready. Stimulus injection has
+its own queue per selected tile. A physical fire is captured once as a record
+that owns both the learning event and the outgoing spike packet; downstream
+stalling cannot change its payload.
+
+### Fabric packets
+
+Every Hyphae flit is 32 bits:
+
+```text
+[31:28] type      0x1 SPIKE, 0x2 CONFIG
+[27:24] reserved  must be zero at a tile endpoint
+[23:20] dst_mask  one bit per tile; multicast is allowed in flight
+[19:0]  body      type-specific
+```
+
+A SPIKE body is `tick_parity[19] | reserved[18:10] | source_gid[9:0]`.
+A tile accepts a locally delivered packet only after routing has reduced the
+destination mask to that tile's one-hot bit and all reserved bits are valid.
+
+A 64-bit CONFIG write consists of an ordered header plus four 16-bit data
+fragments. Spaces select dendrite (`0`), soma (`1`), or axon (`2`). The endpoint
+holds the assembled write until the selected target accepts it. Malformed,
+nested, or out-of-order fragments set a sticky error and do not mutate state.
+See [SPEC.md](SPEC.md#5-routed-configuration-protocol) for the bit layout.
+
+## Verification
+
+The release gate exercises several independent evidence layers:
+
+| Gate | Evidence |
+|---|---|
+| Golden models | 55 pytest tests, including the published demo trajectory |
+| RTL dynamics | 32 cocotb tests across FIFO, router, CDC, endpoint, soma, mesh, tile and SoC |
+| Bring-up probes | 8 self-checking raw Icarus/vvp probes |
+| Mutation testing | 17/17 targeted mutants killed; stale anchors fail the gate |
+| Static analysis | Full default SoC passes Verilator `--lint-only -Wall` with no emitted warnings |
+| Formal | FIFO and router bounded model checks to depth 60 |
+| Synthesis | GF180 mapping for endpoint/router plus whole-SoC coarse Yosys elaboration |
+
+The formal claims are intentionally bounded. They prove the properties encoded
+in the supplied harnesses for 60 steps; they are not an unbounded proof of the
+entire SoC. Exact commands, assumptions and remaining limits are recorded in
+[SPEC.md](SPEC.md#8-verification-and-reproducibility).
+
+### Reproduce locally
+
+Python 3.12 is the verified host version. Icarus Verilog and Verilator must be
+available on `PATH`.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install cocotb pytest matplotlib
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements-lock.txt
 
-# golden models (bit-exact referees)
-python -m pytest golden -q            # 53 golden tests
-
-# whole-chip verification suite (fabric, soma, tile, SoC)
+python -m pytest -q golden
 python verification/cocotb/run_tests.py
+python verification/cocotb/run_tests.py --probes
+python tools/mutant_sweep.py all
+```
 
-# regeneration of the README figures (raster twins + learning trajectory)
-#   — run the soc bench first; the chip panel reads its real fire log
+The mutation tool also accepts individual groups (`hypha_link_fifo`,
+`hypha_router`, `hypha_sync_fifo`, `soma_core`, `soma_dendrite`,
+`hypha_config_endpoint`, `soc_scale`). The CI workflow runs the golden,
+cocotb, probe and Verilator gates from the same hash-locked Python dependency
+set. A checked-in workflow is configuration evidence; only a hosted run on the
+published revision is CI execution evidence.
+
+For the Linux verification box used by this project:
+
+```bash
+bash tools/push_and_run.sh          # cocotb suite
+bash tools/push_and_run.sh probes   # raw probes
+bash tools/push_and_run.sh mutants  # 17-mutant gate + receipt
+bash tools/push_and_run.sh lint     # Verilator -Wall + receipt
+bash tools/push_and_run.sh formal   # BMC-60 + receipt
+bash tools/push_and_run.sh synth    # synthesis + receipt
+```
+
+Remote receipts bind the base commit, working-tree diff, source manifest,
+toolchain versions, outputs and SHA-256 hashes. They are machine-local evidence
+unless separately archived.
+
+## Demonstration figures
+
+The raster and learning figures are generated from executable models and RTL
+test output, not manually drawn traces:
+
+```bash
+python verification/cocotb/run_tests.py celiumneur_soc
 python tools/make_demo_figures.py
 python tools/make_architecture_diagram.py
 ```
 
-The full-flow evidence also runs under WSL2 with the OSS CAD Suite
-(pinned build) or on any dedicated Linux build box; see
-`tools/bootstrap_buildbox.sh` and `tools/push_and_run.sh` for the
-one-command remote path we actually use.
+![RTL/golden raster comparison](golden/demo_raster_compare.png)
 
-## The working chip — proof instead of promise
+![CWR learning trajectory](render/plasticity_trajectory.png)
 
-| Signal | Value (same alphabetic order of ticks) |
-|---|---|
-| Chip fire log (RTL) | `[0,0,0, 4,4,4, 8,8, 12]` |
-| Golden sandbox fire log | `[0,0,0, 4,4,4, 8,8, 12]` |
-
-![Raster twins](golden/demo_raster_compare.png)
-
-The coincidence detector demo (lone input decays, paired inputs fire the
-detector, the output's refractory eats the immediate repeat) runs with
-bit-identical behavior on silicon-flow RTL and on the Python golden
-referee: since the 2026-08-13 closure pass the fire logs are
-**exact-multiset equal** (asserted by test — electrodes ×3 each,
-detector ×2, output ×1; see SPEC.md "Closure pass" for the two real RTL
-bugs this exposed). Bench tick labels differ from sandbox phase indices
-by a fixed shift only (labeling convention, asserted in the test).
-
-## Architecture at a glance
-
-![Block-level architecture — 1:1 with rtl/](render/architecture_block.png)
-
-- **Hyphae mesh** (2×2): X–Y dimension-ordered routing, multicast by
-  branch replication, credit-based flow control, one hardened CDC cell.
-  Packet = 32 bits: `type | reserved | dst mask | source-tick parity | gid`.
-
-- **SomaCore**: improved LIF (saturating arithmetic, subtractive-or-zero
-  reset, per-neuron threshold/leak/refractory, ceiling-division leak).
-
-- **Dendrite (I2)**: synaptic indirection table — topology lives in an
-  addressable table, never in memory geometry.
-
-- **Snooper / CWR (I4)**: the causal-window rule (pair-based: LTP at fire,
-  LTD at window expiry, saturating at ±127) snooping the fabric in the
-  background — the name "pair-STDP v1.2" was retired; a comparison against
-  reference Song–Miller–Abbott STDP is listed as future work in SPEC.md.
-  Golden-side learning run: `golden/demo_plasticity.py`.
-
-- **SomaTile**: tile = soma + dendrite + snooper + skid input buffer;
-  the axon-side packetizer emits spikes with source-tick parity so the
-  fabric can do phase-gated delivery (closed-form timeline equality).
-
-- **Observability**: synaptic tables and soma state readable while
-  running, without halting computation.
-
-![CWR learning trajectory — paired potentiates, uncorrelated depresses](render/plasticity_trajectory.png)
-
-The paired wire (A→detector) potentiates to the +127 rail over 30 rounds
-while the never-paired control wire (C→detector) depresses toward the
-floor — real trajectory from `golden/demo_plasticity.py`, nothing
-hardcoded. Regenerated by `python tools/make_demo_figures.py`.
-
-Full physical claim, assumption ledger, and verification bill of
-materials: see `SPEC.md`.
+The demo uses neuron 0 in each 256-neuron tile, so its global IDs are 0, 256,
+512 and 768. The scale boundary test separately configures tile 3 neuron 255
+and verifies an emitted GID of 1023.
 
 ## Repository map
 
-```
-celiumneur/
-├── LICENSE                    (dual: code AGPL-3.0+, docs CC BY 4.0)
-├── LICENSES/AGPL-3.0.txt
-├── LICENSES/CC-BY-4.0.txt
-├── NOTICE.md                  (provenance + audited works)
-├── SPEC.md                    (invariants, ledger, formal scope, debts)
-├── rtl/                       (verified Verilog-2001)
-│   ├── hyphae/                (router, link fifo, hardened CDC fifo)
-│   ├── soma/                  (soma_core, soma_dendrite, neuro_tile)
-│   └── top/                   (hyphae_mesh_2x2, celiumneur_soc)
-├── golden/                    (bit-exact referees + demo nets + raster)
-├── verification/
-│   ├── cocotb/                (suite runner + per-module benches)
-│   ├── formal/                (sby BMC-60 harness wrappers)
-│   └── probes/                (hand smoke tests for bring-up)
-├── tools/                     (push_and_run, bootstrap, sweeps, render)
-└── render/                    (posters, die renders, three.js scene)
+```text
+rtl/hyphae/           link FIFO, router and hardened CDC FIFO
+rtl/soma/             soma, dendrite/CWR and composed neuro_tile
+rtl/top/              2×2 mesh, CONFIG endpoint and default SoC
+golden/               bit-exact Python referees and executable demos
+verification/cocotb/  module, adversarial and end-to-end RTL tests
+verification/formal/  SymbiYosys BMC harnesses
+verification/probes/  raw self-checking Verilog probes
+tools/                verification, mutation, synthesis and render tools
+render/               generated architecture and presentation assets
 ```
 
-## Licensing
+## Scope and open work
 
-- **Code**: AGPL-3.0-or-later (`LICENSES/AGPL-3.0.txt`).
-- **Docs, posters, renders**: CC BY 4.0 (`LICENSES/CC-BY-4.0.txt`).
-- See `NOTICE.md` for the audited prior work this stands on. No third-party
-  RTL was incorporated; the audit informed the invariants only.
+The current repository does not yet provide physical memory macros, CDC use in
+the default single-clock SoC, CONFIG reads over the mesh, a host software stack,
+unbounded liveness proofs, timing closure, power characterization, PnR, FPGA
+deployment, or silicon measurements. CWR is a small causal-window adaptation
+rule, not a claim of biological fidelity or equivalence to reference STDP.
 
-## Cite
+## Licensing and citation
 
-If you build on this, cite the archived release:
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21925426.svg)](https://doi.org/10.5281/zenodo.21925426)
+- Code: AGPL-3.0-or-later.
+- Documentation and artwork: CC BY 4.0.
+- Audited prior work informed the invariants; no third-party RTL was copied.
+  See [NOTICE.md](NOTICE.md) for third-party boundaries and the
+  [reproducible audit pack](audit/README.md) for exact commits and evidence.
 
 > Gutierrez, M. (2026). *CeliumNeUR — a verification-first neuromorphic
-> SoC v1* (v0.0.1). Celiums Solutions LLC.
+> SoC v1* (v0.0.2). Celiums Solutions LLC.
 > https://doi.org/10.5281/zenodo.21925426
 
-See `CITATION.cff` for the machine-readable record (Zenodo-linked).
-
----
-
-*CeliumNeUR — a Celiums Solutions LLC project. Hardware that can be
-watched thinking, verified as it thinks.*
+See [CITATION.cff](CITATION.cff) for the machine-readable record and
+[CHANGELOG.md](CHANGELOG.md) for release history.

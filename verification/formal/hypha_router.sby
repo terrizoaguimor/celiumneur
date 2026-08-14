@@ -6,7 +6,7 @@ bmc: mode bmc
 bmc: depth 60
 
 [engines]
-bmc: smtbmc yices
+bmc: smtbmc bitwuzla
 
 [script]
 read_verilog -formal -DFORMAL=1 hypha_link_fifo.v hypha_router.v hypha_router_formal.v

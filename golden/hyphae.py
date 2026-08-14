@@ -12,8 +12,9 @@ Transaction-level referee for the RTL router/link verification. Models:
   turns back into the X dimension.
 - Multicast by branch replication: a packet leaves on every output port that
   still holds destinations, carrying the sub-mask for that branch. Fanout is
-  limited only by core count, never by a hardware table (kills ed-snn-fpga's
-  16-entry cap and ODIN's serial 512-cycle fanout sweep).
+  limited only by core count, without an independent per-source connection
+  cap (the audited ed-snn-fpga pin defaults to 32 entries; ODIN uses a serial
+  512-cycle dense population sweep).
 - Credit-based flow control (Invariant I1): a link transmits only against
   an available credit; there is no drop path anywhere in the model. Credit
   returns happen when the downstream FIFO pops; the mesh audits every cycle

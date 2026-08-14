@@ -22,7 +22,7 @@ Sources: neuron dynamics per Gerstner (Ch.1.3) + snnTorch discrete LIF
 from hyphae import CORE_COUNT, HyphaeMesh, Packet, TYPE_SPIKE
 from soma import NeuronParams, Soma
 
-NEURONS_PER_CORE = 4
+NEURONS_PER_CORE = 256
 GLOBAL_NEURONS = CORE_COUNT * NEURONS_PER_CORE
 
 
@@ -62,9 +62,12 @@ class NeuroSandbox:
         # observability: the sandbox exists to watch itself
         self.v_trace: list[list[int]] = [[] for _ in range(GLOBAL_NEURONS)]
         self.fire_log: list[tuple[int, int]] = []  # (tick, global neuron)
-        self.plasticity = None  # PairSTDP when enabled (I4); None = frozen weights
-        # arrival ledger: (post_core, pre_gid, entry_index, post_gid, tick)
-        self._arrival_ledger: list[tuple[int, int, int, int, int]] = []
+        self.plasticity = None  # CausalWindowRule or None for frozen weights
+        # One physical table entry owns one latest-arrival slot, matching RTL:
+        # key=(post_core, pre_gid, entry_index), value=(post_gid, tick).
+        self._arrival_ledger: dict[
+            tuple[int, int, int], tuple[int, int]
+        ] = {}
 
     def enable_plasticity(self, rule) -> None:
         self.plasticity = rule
@@ -98,15 +101,17 @@ class NeuroSandbox:
             # exactly once; arrivals too old are left to LTD at their side.)
             t = self.tick_index
             to_potentiate = [
-                rec for rec in self._arrival_ledger
-                if rec[3] == gid and self.plasticity.recent_arrivals_filter(t, rec[4])
+                (key, arrival)
+                for key, arrival in self._arrival_ledger.items()
+                if arrival[0] == gid
+                and self.plasticity.recent_arrivals_filter(t, arrival[1])
             ]
-            for rec in to_potentiate:
-                core_, pre_, idx_ = rec[0], rec[1], rec[2]
+            for key, _arrival in to_potentiate:
+                core_, pre_, idx_ = key
                 self.table.set_weight(
                     core_, pre_, idx_,
                     self.plasticity.potentiate(self.table.expand(core_, pre_)[idx_][1]))
-            self._arrival_ledger = [r for r in self._arrival_ledger if r not in to_potentiate]
+                del self._arrival_ledger[key]
         self._stage_spike(gid)
 
     def _drain_and_integrate(self) -> None:
@@ -120,8 +125,8 @@ class NeuroSandbox:
                     # ledger record is all that happens now.
                     fired = self.somas[gid].apply_synaptic_input(weight)
                     if self.plasticity is not None:
-                        self._arrival_ledger.append(
-                            (core, packet.body, entry_index, gid, self.tick_index))
+                        self._arrival_ledger[(core, packet.body, entry_index)] = (
+                            gid, self.tick_index)
                     if fired:
                         self._fire(gid)
         for router in self.mesh.routers.values():
@@ -145,14 +150,15 @@ class NeuroSandbox:
         # LTD accounting: ledger entries whose causal window closed unpaid.
         if self.plasticity is not None:
             t = self.tick_index
-            surviving = []
-            for rec in self._arrival_ledger:
-                core_, pre_, idx_, _post, t_arr = rec
+            surviving = {}
+            for key, arrival in self._arrival_ledger.items():
+                core_, pre_, idx_ = key
+                _post, t_arr = arrival
                 if self.plasticity.expired(t, t_arr):
                     self.table.set_weight(
                         core_, pre_, idx_,
                         self.plasticity.on_expiry(self.table.expand(core_, pre_)[idx_][1]))
                 else:
-                    surviving.append(rec)
+                    surviving[key] = arrival
             self._arrival_ledger = surviving
         self.tick_index += 1

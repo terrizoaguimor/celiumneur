@@ -1,0 +1,147 @@
+{
+  "schema": "celiumneur.external-rtl-audit.v1",
+  "reviewed_on": "2026-08-13",
+  "hash_normalization": "replace CRLF and CR with LF before SHA-256",
+  "sources": [
+    {
+      "id": "odin",
+      "name": "ODIN",
+      "directory": "ODIN",
+      "repository": "https://github.com/ChFrenkel/ODIN.git",
+      "commit": "17819318d17b6241d4b185c13ce9b3372d453778",
+      "tree": "1caebc381fd34a31cf45f66edd9bbfbf8d03cb03",
+      "license": {"spdx": "SHL-2.0", "path": "LICENSE", "normalized_sha256": "8fe2a36153647a1200984f6ac0bf5e2df72783d433f1f03ec5ef78be2b40d420"},
+      "files": [
+        {"path": "src/controller.v", "normalized_sha256": "f83a3c4be91ddb39ce2e6b073cf819aab53aafa73bc47fbca3e4bfbc671df651"}
+      ]
+    },
+    {
+      "id": "reckon",
+      "name": "ReckOn",
+      "directory": "ReckOn",
+      "repository": "https://github.com/ChFrenkel/ReckOn.git",
+      "commit": "5e5c0bea8fe1897876ba3b7bfdcecf76d3bf4505",
+      "tree": "71a3be097eaf2ed27b76278bdd5742c76b63abd7",
+      "license": {"spdx": "SHL-2.1", "path": "LICENSE", "normalized_sha256": "3e5d1c0eb38cf46c5d722fead6b0e53cabb3df8bd2a934cb4fad33275b103e32"},
+      "files": [
+        {"path": "src/reckon.v", "normalized_sha256": "c653a758a7539b33720aefd7e8f653ccf499e085e8f154de6dc912c92ff6d033"},
+        {"path": "src/srnn.v", "normalized_sha256": "671ae937d83f9b0e4f95aaaabed1f962498f8fde4bbd7d3a5bc2c77993fc21e6"}
+      ]
+    },
+    {
+      "id": "ed-snn-fpga",
+      "name": "Event-Driven Spiking Neural Network Accelerator for FPGA",
+      "directory": "ed-snn-fpga",
+      "repository": "https://github.com/ljiwoon/Event-Driven-Spiking-Neural-Network-Accelerator-for-FPGA.git",
+      "commit": "eb974d231c130784fad5aa7b1f48668d4e5b45d6",
+      "tree": "6a070228312a96767fb2434f670183ed74d81311",
+      "license": {"spdx": "MIT", "path": "LICENSE", "normalized_sha256": "bc8e0ab636ffa778bd4d2f761db1237c7805d2228895c8e0a85463914f63d70a"},
+      "files": [
+        {"path": "hardware/hdl/rtl/core/core_group.v", "normalized_sha256": "fe95c04fabd944d151c57bc76c58c303a266181d93a70a15191ab074d635b4d5"},
+        {"path": "hardware/hdl/rtl/router/spike_router.v", "normalized_sha256": "d8845dc77a4f36524e7416d4a58b61f8a96d7c98d90448e555a7c8327fba34bf"},
+        {"path": "hardware/hdl/rtl/top/snn_integrated_top.v", "normalized_sha256": "825db9a497b5cb3f76edb4bd91ab01ddd056bb117b1d47d02ea5eab3cf8e19e4"},
+        {"path": "hardware/hdl/rtl/neurons/lif_neuron_array.v", "normalized_sha256": "e7fc7a430c92cbf1090e01d93754c4a9ce17b29a24c417bc716fe3a17b4e321f"}
+      ]
+    },
+    {
+      "id": "lif-tt-asic",
+      "name": "lif-spiking-neural-network",
+      "directory": "lif-tt-asic",
+      "repository": "https://github.com/ilim-stankulov/lif-spiking-neural-network.git",
+      "commit": "e719c332abf20572a0a33aea2f57fea26ae9046c",
+      "tree": "fa965cf25c49742283796050439aa4a37d2a0a5a",
+      "license": {"spdx": "Apache-2.0", "path": "LICENSE", "normalized_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"},
+      "files": [
+        {"path": "src/lif_components.v", "normalized_sha256": "51df22d5b0d0ff372100989cde6b6147ae1395473a5c5f2d61e777d8ae5c68e5"},
+        {"path": "src/project.v", "normalized_sha256": "604547f16afab80dd34d61f477f3731d9570d425636ca6592371bc28096ed385"},
+        {"path": "test/test.py", "normalized_sha256": "4255786d4fb5d3649d1a0d79ff344cf0263cd7a6c3dd366b8dbefceb950be8ff"}
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "ODIN-CDC-001", "source": "odin", "classification": "protocol-dependent boundary", "invariants": ["I3"],
+      "anchors": [
+        {"path": "src/controller.v", "start": 127, "end": 156, "normalized_sha256": "f7961e9f1027157214ac2a5d55add77269d1fb95caf49ce4bbede283449d4e58"}
+      ]
+    },
+    {
+      "id": "ODIN-SCAN-002", "source": "odin", "classification": "architectural tradeoff", "invariants": ["I2", "I4"],
+      "anchors": [
+        {"path": "src/controller.v", "start": 171, "end": 210, "normalized_sha256": "a1cb218656179c84ad5612044e4bae34c46a38ad2e59077bc23da04b68a9b99e"},
+        {"path": "src/controller.v", "start": 431, "end": 455, "normalized_sha256": "481a3ba1265cf0b7a7842daa65c026de8b2da582fee203a2234cee64996365fe"}
+      ]
+    },
+    {
+      "id": "RECKON-CLK-001", "source": "reckon", "classification": "integration constraint", "invariants": ["I3"],
+      "anchors": [
+        {"path": "src/reckon.v", "start": 461, "end": 470, "normalized_sha256": "25549aaf8aae669d1bf1fdf3d7ff941ae59afc0dc844104cc5fbd2d45ca8025e"}
+      ]
+    },
+    {
+      "id": "RECKON-PHASE-002", "source": "reckon", "classification": "architectural tradeoff", "invariants": ["I4"],
+      "anchors": [
+        {"path": "src/srnn.v", "start": 711, "end": 740, "normalized_sha256": "e8b74e98dbf79cb97ed0790068b98a7f08ac5ae3cc3d7b2e49efd2c59e9d6894"}
+      ]
+    },
+    {
+      "id": "RECKON-TOPO-003", "source": "reckon", "classification": "architectural tradeoff", "invariants": ["I2"],
+      "anchors": [
+        {"path": "src/srnn.v", "start": 1001, "end": 1008, "normalized_sha256": "056d2d5b4150f03ff2c71c3fd986ef72cb69149b472641829e9494ccdd6dece3"}
+      ]
+    },
+    {
+      "id": "RECKON-PARAM-004", "source": "reckon", "classification": "parameter granularity", "invariants": ["I7"],
+      "anchors": [
+        {"path": "src/srnn.v", "start": 1034, "end": 1066, "normalized_sha256": "5af4ddaccfc9d77e0f323e12edf569a79fbc00e62643cae2c4e0fc95c77ffd23"}
+      ]
+    },
+    {
+      "id": "EDSNN-NODROP-001", "source": "ed-snn-fpga", "classification": "loss path", "invariants": ["I1"],
+      "anchors": [
+        {"path": "hardware/hdl/rtl/core/core_group.v", "start": 418, "end": 434, "normalized_sha256": "55fd25072ef3eb16e5dcd11f1d3353563d96552ff12a0a8f75c1b8e14ae3f35d"}
+      ]
+    },
+    {
+      "id": "EDSNN-TIME-002", "source": "ed-snn-fpga", "classification": "time-semantics coupling", "invariants": ["I7"],
+      "anchors": [
+        {"path": "hardware/hdl/rtl/core/core_group.v", "start": 35, "end": 76, "normalized_sha256": "3b70dba7010a73a4d83744004ab424d0081709f57df6d2eb20a57f8b2cf4f8e4"},
+        {"path": "hardware/hdl/rtl/core/core_group.v", "start": 300, "end": 349, "normalized_sha256": "8b4f0e8a1e4d7664bb441f8325e1925d6809e05e028b594fc052942f7ef8eeff"},
+        {"path": "hardware/hdl/rtl/core/core_group.v", "start": 440, "end": 442, "normalized_sha256": "1244813574703e3eb8bb7f7ef404270efc309fb89332ae7e855d17ab00f301b5"}
+      ]
+    },
+    {
+      "id": "EDSNN-FANOUT-003", "source": "ed-snn-fpga", "classification": "capacity contract", "invariants": ["I2"],
+      "anchors": [
+        {"path": "hardware/hdl/rtl/router/spike_router.v", "start": 13, "end": 15, "normalized_sha256": "88e93f6759e13e200f84d4154ead3ea42eebf39a3718b0c54d2b0170faf8893b"},
+        {"path": "hardware/hdl/rtl/router/spike_router.v", "start": 83, "end": 92, "normalized_sha256": "b7857ad07a0e2ac9442ca79eb17989350d0fb6ce764cbdad17a540211f793d07"},
+        {"path": "hardware/hdl/rtl/top/snn_integrated_top.v", "start": 518, "end": 524, "normalized_sha256": "2cfd6fcedf4b519368995f94fee6a57339ec773595efe61be89b07b7d2a32112"}
+      ]
+    },
+    {
+      "id": "EDSNN-OUT-004", "source": "ed-snn-fpga", "classification": "observable loss path", "invariants": ["I1"],
+      "anchors": [
+        {"path": "hardware/hdl/rtl/neurons/lif_neuron_array.v", "start": 451, "end": 465, "normalized_sha256": "b9e92b835698314533aa0688011166ed8e493835a2629c453a0d463f9cd146b8"},
+        {"path": "hardware/hdl/rtl/neurons/lif_neuron_array.v", "start": 490, "end": 504, "normalized_sha256": "7c469d8bc4243292529b002296b5b537b4ff489897d8cda215b594c681942bba"}
+      ]
+    },
+    {
+      "id": "LIF-ARITH-001", "source": "lif-tt-asic", "classification": "arithmetic boundary", "invariants": ["I6"],
+      "anchors": [
+        {"path": "src/lif_components.v", "start": 3, "end": 24, "normalized_sha256": "b608d3f920d4fa92fc217ed904b1218b3ba10b5c85f15aafaa12ca70e2dcf134"}
+      ]
+    },
+    {
+      "id": "LIF-OBS-002", "source": "lif-tt-asic", "classification": "observability boundary", "invariants": ["I5"],
+      "anchors": [
+        {"path": "src/project.v", "start": 49, "end": 85, "normalized_sha256": "352ac4848acbfcccedbac7e72c1f53fd447b029f924878c238ddeb631ed95005"}
+      ]
+    },
+    {
+      "id": "LIF-TEST-003", "source": "lif-tt-asic", "classification": "verification gap", "invariants": ["I8"],
+      "anchors": [
+        {"path": "test/test.py", "start": 110, "end": 160, "normalized_sha256": "859c393d763a9bf049b378205cc916f742c14cbad622470161266c81511054dd"}
+      ]
+    }
+  ]
+}

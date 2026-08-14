@@ -19,7 +19,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "golden"))
-from plasticity import PairSTDP, WEIGHT_RAIL_HI, WEIGHT_RAIL_LO  # noqa: E402
+from plasticity import CausalWindowRule, WEIGHT_RAIL_HI, WEIGHT_RAIL_LO  # noqa: E402
 from soma import NeuronParams, Soma  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,7 +43,7 @@ class CoreReferee:
         self.table = [[0, 0, 0, 0] for _ in range(ENTRIES)]
         self.ledger = [None] * ENTRIES
         self.tick_cnt = 0
-        self.rule = PairSTDP(window_ticks=WINDOW)
+        self.rule = CausalWindowRule(window_ticks=WINDOW)
         self.fire_log = []
 
     def load(self, addr, valid, pre_gid, post_local, weight):
@@ -52,17 +52,18 @@ class CoreReferee:
     def _pot_pass(self, local):
         for i, (v, _pg, post, _w) in enumerate(self.table):
             if v and post == local and self.ledger[i] is not None \
-                    and (self.tick_cnt - self.ledger[i]) <= WINDOW:
+                    and self.rule.recent_arrivals_filter(
+                        self.tick_cnt, self.ledger[i]):
                 w = self.table[i][3]
-                self.table[i][3] = min(WEIGHT_RAIL_HI, w + 1)
+                self.table[i][3] = self.rule.potentiate(w)
                 self.ledger[i] = None
         self._expiry_pass()  # RTL chains EXP after POT; harmless + mirrored
 
     def _expiry_pass(self):
         for i, (v, _pg, _post, w) in enumerate(self.table):
             if v and self.ledger[i] is not None \
-                    and (self.tick_cnt - self.ledger[i]) > WINDOW:
-                self.table[i][3] = max(WEIGHT_RAIL_LO, w - 1)
+                    and self.rule.expired(self.tick_cnt, self.ledger[i]):
+                self.table[i][3] = self.rule.on_expiry(w)
                 self.ledger[i] = None
 
     def feed_spike(self, gid):
@@ -90,8 +91,10 @@ class CoreReferee:
 
 async def reset_tile(dut):
     dut.rst_n.value = 0
-    for sig in ("spk_valid", "tick", "cfg_en", "rb_soma_req"):
-        getattr(dut, sig).value = 0
+    for sig in ("spk_valid", "stim_valid", "tick", "cfg_en",
+                "cfg_soma_en", "cfg_axon_en", "rb_soma_req"):
+        if hasattr(dut, sig):
+            getattr(dut, sig).value = 0
     if hasattr(dut, "integrate_open"):
         dut.integrate_open.value = 1   # tile unit: integration always open
     if hasattr(dut, "spk_parity"):
@@ -150,8 +153,8 @@ async def program_tile(dut, entries, ref):
     for addr, (valid, pre, post, weight) in enumerate(entries):
         ref.load(addr, valid, pre, post, weight)
         dut.cfg_addr.value = addr
-        dut.cfg_wdata.value = ((valid & 1) << 20) | ((pre & 0x3FF) << 10) \
-            | ((post & 0x3) << 8) | (weight & 0xFF)
+        dut.cfg_wdata.value = ((valid & 1) << 26) | ((pre & 0x3FF) << 16) \
+            | ((post & 0xFF) << 8) | (weight & 0xFF)
         dut.cfg_en.value = 1
         await RisingEdge(dut.clk)
         await FallingEdge(dut.clk)
@@ -235,8 +238,10 @@ async def dendrite_boundary_window_exact(dut):
         await bench_tick(dut)                        # 3 boundary passes
         ref.tick()
 
-    # the trigger pair delivers: fires the detector; POT pays at the edge
-    await bench_spike(dut, 0);  ref.feed_spike(0)    # second half of the pair
+    # The second A arrival restores enough membrane for B to fire the post.
+    # Under the >= expiry mutant, the original t0 slot was already depressed
+    # and cleared before this new arrival, so the final weight remains short.
+    await bench_spike(dut, 0);  ref.feed_spike(0)
     await bench_spike(dut, 4);  ref.feed_spike(4)    # crossing: post fires
     # then any later tick pays the ledger: mandatory Pot runs on the fire
     await bench_tick(dut);      ref.tick()
@@ -248,3 +253,115 @@ async def dendrite_boundary_window_exact(dut):
         f"window-edge arrival: RTL weight {got_a:#x} != referee {expected_a:#x}"
     assert (got_a if got_a < 128 else got_a - 256) == 121, \
         "the boundary arrival must earn exactly +1"
+
+
+@cocotb.test()
+async def dendrite_potentiates_a_delayed_arrival_inside_window(dut):
+    """A postsynaptic fire two ticks later must still pay the t0 ledger.
+
+    The trigger uses a different table entry, so the observed ledger cannot
+    be refreshed to age zero. This is the direct witness against a collapsed
+    same-tick-only potentiation window.
+    """
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    await reset_tile(dut)
+
+    delayed_detector = NeuronParams(
+        theta=100, leak_shift=15, refractory_ticks=0,
+        subtractive_reset=True,
+    )
+    dut.soma.nram[0].value = pack_word(delayed_detector)
+    for idx in (1, 2, 3):
+        dut.soma.nram[idx].value = pack_word(GPIO_PARAMS)
+
+    # entry0 arrives at t0 with 50. Two ticks leak it to 48. A distinct
+    # entry then adds 60, fires the post at t2 and must potentiate entry0.
+    dut.cfg_addr.value = 0
+    dut.cfg_wdata.value = (1 << 26) | (0 << 16) | 50
+    dut.cfg_en.value = 1
+    await RisingEdge(dut.clk)
+    await FallingEdge(dut.clk)
+    dut.cfg_addr.value = 1
+    dut.cfg_wdata.value = (1 << 26) | (4 << 16) | 60
+    await RisingEdge(dut.clk)
+    await FallingEdge(dut.clk)
+    dut.cfg_en.value = 0
+
+    await bench_spike(dut, 0)
+    await bench_tick(dut)
+    await bench_tick(dut)
+    await bench_spike(dut, 4)
+
+    dut.rb_dend_addr.value = 0
+    await FallingEdge(dut.clk)
+    got = int(dut.rb_dend_rdata.value) & 0xFF
+    assert got == 51, f"delayed in-window arrival was not potentiated: {got}"
+
+
+@cocotb.test()
+async def dendrite_configuration_waits_for_acceptance(dut):
+    """A config request held during a scan is written once the table is idle."""
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    await reset_tile(dut)
+
+    dut.spk_gid.value = 9
+    dut.spk_valid.value = 1
+    while True:
+        await FallingEdge(dut.clk)
+        ready = int(dut.spk_ready.value)
+        await RisingEdge(dut.clk)
+        if ready:
+            break
+    await FallingEdge(dut.clk)
+    dut.spk_valid.value = 0
+
+    for _ in range(20):
+        await FallingEdge(dut.clk)
+        if int(dut.dend_busy.value):
+            break
+    assert int(dut.dend_busy.value) == 1, "scan did not start"
+
+    replacement = (1 << 26) | (77 << 16) | (3 << 8) | 0xA5
+    dut.cfg_addr.value = 15
+    dut.cfg_wdata.value = replacement
+    dut.cfg_en.value = 1
+    for _ in range(200):
+        await FallingEdge(dut.clk)
+        if int(dut.cfg_ready.value):
+            await RisingEdge(dut.clk)
+            break
+    else:
+        raise AssertionError("dendrite config never became ready")
+    await FallingEdge(dut.clk)
+    dut.cfg_en.value = 0
+
+    dut.rb_dend_addr.value = 15
+    await FallingEdge(dut.clk)
+    assert int(dut.rb_dend_rdata.value) == replacement
+
+
+@cocotb.test()
+async def repeated_arrival_uses_one_latest_ledger_slot(dut):
+    """Duplicate arrivals on one physical entry earn one CWR update."""
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    await reset_tile(dut)
+
+    detector = NeuronParams(theta=100, leak_shift=15, refractory_ticks=0,
+                            subtractive_reset=True)
+    dut.soma.nram[0].value = pack_word(detector)
+    for idx in (1, 2, 3):
+        dut.soma.nram[idx].value = pack_word(GPIO_PARAMS)
+
+    dut.cfg_addr.value = 0
+    dut.cfg_wdata.value = (1 << 26) | (4 << 16) | 50
+    dut.cfg_en.value = 1
+    await RisingEdge(dut.clk)
+    await FallingEdge(dut.clk)
+    dut.cfg_en.value = 0
+
+    await bench_spike(dut, 4)
+    await bench_spike(dut, 4)
+
+    dut.rb_dend_addr.value = 0
+    await FallingEdge(dut.clk)
+    assert (int(dut.rb_dend_rdata.value) & 0xFF) == 51

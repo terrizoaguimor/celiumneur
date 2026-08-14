@@ -7,26 +7,31 @@ module axon_burst_tb;
     always #5 clk = ~clk;
 
     reg        cfg_en = 0;
-    reg  [4:0] cfg_addr = 0;
-    reg  [20:0] cfg_wdata = 0;
+    reg  [3:0] cfg_addr = 0;
+    reg  [26:0] cfg_wdata = 0;
     reg        stim_valid = 0;
     reg  [7:0] stim_neuron = 0;
     reg  [7:0] stim_weight = 0;
 
-    neuro_tile #(.GID_BASE(0), .NEURONS(4), .ID_BITS(2)) dut (
+    neuro_tile #(.GID_BASE(0), .NEURONS(4), .ID_BITS(2),
+                 .DEFAULT_AXON_MASK(4'hf)) dut (
         .clk(clk), .rst_n(rst_n),
         .spk_valid(1'b0), .spk_gid(10'b0), .spk_parity(1'b1),
         .spk_ready(), .spk_overflow_wit(),
         .stim_valid(stim_valid), .stim_neuron(stim_neuron),
-        .stim_weight(stim_weight),
-        .tick(1'b0), .integrate_open(1'b1),
+        .stim_weight(stim_weight), .stim_ready(),
+        .tick(1'b0), .tick_ready(), .integrate_open(1'b1),
         .cfg_en(cfg_en), .cfg_addr(cfg_addr), .cfg_wdata(cfg_wdata),
-        .rb_dend_addr(5'd0), .rb_dend_rdata(),
+        .cfg_ready(),
+        .cfg_soma_en(1'b0), .cfg_soma_addr(8'd0),
+        .cfg_soma_wdata(64'd0), .cfg_soma_ready(),
+        .cfg_axon_en(1'b0), .cfg_axon_addr(2'd0),
+        .cfg_axon_wdata(4'd0), .cfg_axon_ready(),
+        .rb_dend_addr(4'd0), .rb_dend_rdata(),
         .rb_soma_addr(8'd0), .rb_soma_req(1'b0),
-        .rb_soma_data(), .rb_soma_ready(),
-        .axon_masks(16'hffff),
+        .rb_soma_data(), .rb_soma_ready(), .rb_soma_valid(),
         .out_spk_valid(), .out_spk_pkt(), .out_spk_ready(1'b1),
-        .out_stall_wit(),
+        .out_stall_wit(), .fire_overflow_wit(),
         .dend_busy(), .tile_busy()
     );
 
@@ -55,10 +60,14 @@ module axon_burst_tb;
         // (the "only n=1 fires" scar). Wait for the sweep to finish.
         wait (dut.soma.sweep_active == 1'b0);
         repeat (4) @(negedge clk);
-        dut.soma.nram[0] = { 16'd10, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0 };
-        dut.soma.nram[1] = { 16'd10, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0 };
-        dut.soma.nram[2] = { 16'd10, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0 };
-        dut.soma.nram[3] = { 16'd10, 1'b1, 4'd15, 8'd0, 8'd0, 3'b0, 16'd0 };
+        dut.soma.nram[0] = {16'd10, 1'b1, 4'd15, 8'd0, 8'd0,
+                            8'd0, 3'b0, 16'd0};
+        dut.soma.nram[1] = {16'd10, 1'b1, 4'd15, 8'd0, 8'd0,
+                            8'd0, 3'b0, 16'd0};
+        dut.soma.nram[2] = {16'd10, 1'b1, 4'd15, 8'd0, 8'd0,
+                            8'd0, 3'b0, 16'd0};
+        dut.soma.nram[3] = {16'd10, 1'b1, 4'd15, 8'd0, 8'd0,
+                            8'd0, 3'b0, 16'd0};
 
         // a soma event costs ~3 fabric cycles (S_IDLE->EV_RD->EV_AP); a
         // strobe arriving mid-event is silently dropped. Space the burst.
@@ -68,7 +77,7 @@ module axon_burst_tb;
         repeat (400) @(negedge clk);
         if (fires[0] == 1 && fires[1] == 1 && fires[2] == 1 &&
             outs[0] == 1 && outs[1] == 1 && outs[2] == 1)
-            $display("AXON-PROBE-END fires+packets complete");
+            $display("AXON-BURST-PASS fires+packets complete");
         else
             $display("AXON-PROBE incomplete: fires=%0d,%0d,%0d outs=%0d,%0d,%0d",
                      fires[0], fires[1], fires[2], outs[0], outs[1], outs[2]);

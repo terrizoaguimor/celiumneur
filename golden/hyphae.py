@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Bit-exact golden model of the Hyphae fabric (SPEC.md §2).
+"""Bit-exact golden model of the Hyphae fabric (SPEC.md §4).
 
 Transaction-level referee for the RTL router/link verification. Models:
 

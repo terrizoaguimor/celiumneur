@@ -146,7 +146,7 @@ partial transaction and never write configuration.
 ### 6.1 Soma word
 
 ```text
-[63:48] threshold, unsigned 16-bit
+[63:48] threshold, unsigned 16-bit — valid range 1..32767, see below
 [47]    reset mode: 1 subtract threshold, 0 reset to zero
 [46:43] leak shift k
 [42:35] refractory duration in ticks
@@ -155,6 +155,13 @@ partial transaction and never write configuration.
 [18:16] reserved flags, write zero
 [15:0]  membrane potential, signed 16-bit
 ```
+
+The threshold field is physically 16 bits wide but the membrane potential is
+signed 16-bit, so values 32768..65535 are unsatisfiable (the neuron could
+never fire) and 0 would fire at a resting membrane. The valid configuration
+range is therefore **1..32767**; the golden model rejects anything outside it
+(`golden/soma.py`, `NeuronParams`), and writing an out-of-range threshold
+through CONFIG is undefined behavior outside the verified envelope.
 
 On a time tick, leak moves the membrane potential toward zero by
 `ceil(abs(v) / 2**k)`. Synaptic input and leak use a widened accumulator and

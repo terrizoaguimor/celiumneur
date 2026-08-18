@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Dynamics-first tests for the Hyphae golden fabric (SPEC §2, Invariant I1).
+"""Dynamics-first tests for the Hyphae golden fabric (SPEC §4, Invariant I1).
 
 Every test moves packets across the mesh; silence-only tests are forbidden
 (I8). Invariant I1 means: no test may pass because something was dropped.

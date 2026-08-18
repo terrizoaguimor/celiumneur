@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""golden_net.py — end-to-end golden simulator of CeliumNeUR (SPEC §2+§3).
+"""golden_net.py — end-to-end golden simulator of CeliumNeUR (SPEC §4+§6).
 
 Composition of the two verified referees: HyphaeMesh moves spike packets,
 Soma instances integrate events at the destination core. The dendrite maps

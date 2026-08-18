@@ -100,8 +100,11 @@ class Soma:
         """
         self.v = saturate_vmem(self.v - ceiling_leak_amount(self.v, self.params.leak_shift))
         fired = self._evaluate_spike()
-        # Decrement after evaluation: a fire at tick t blocks exactly
-        # refractory_ticks subsequent ticks, no off-by-one drift.
+        # Decrement after evaluation: an EVENT-path fire at tick t blocks
+        # exactly refractory_ticks subsequent ticks. A TICK-path fire (the
+        # `fired` above) has its fresh countdown decremented in this same
+        # call and blocks refractory_ticks - 1: the asymmetry is contract,
+        # SPEC §6.1, pinned by test_tick_path_fire_blocks_one_fewer_tick....
         if self.refractory_countdown > 0:
             self.refractory_countdown -= 1
         return fired

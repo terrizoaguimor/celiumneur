@@ -159,6 +159,25 @@ def test_superthreshold_survives_refractory_then_fires_on_tick():
     assert soma.advance_time() is True              # countdown spent -> fires
 
 
+def test_tick_path_fire_blocks_one_fewer_tick_than_event_path_fire():
+    # Contract (SPEC §6.1): the countdown is evaluated before it is
+    # decremented within a tick. An event-path fire therefore blocks exactly
+    # R ticks, while a tick-path fire has its fresh countdown decremented in
+    # the same advance_time call and blocks R-1. Pins issue #2.
+    event = default_soma(refractory_ticks=2, leak_shift=NO_LEAK, theta=50)
+    assert event.apply_synaptic_input(60) is True    # event-path fire
+    assert event.refractory_countdown == 2           # full R survives the event
+
+    tick = default_soma(refractory_ticks=2, leak_shift=NO_LEAK, theta=50)
+    assert tick.apply_synaptic_input(127) is True    # v := 77, cd := 2
+    assert tick.advance_time() is False              # blocked, cd -> 1
+    assert tick.advance_time() is False              # blocked, cd -> 0
+    assert tick.advance_time() is True               # tick-path fire
+    assert tick.refractory_countdown == 1            # cd := 2, same-call -> 1
+    assert tick.advance_time() is False              # only R-1 = 1 blocked tick
+    assert tick.refractory_countdown == 0
+
+
 # --- Per-neuron independence (I7; ReckOn paired packing regression) ---------
 
 def test_minimum_signed_weight_integrates_exactly():

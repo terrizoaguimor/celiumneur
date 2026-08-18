@@ -163,6 +163,16 @@ updated potential reaches its threshold. Fire payload records local neuron,
 phase parity and physical fire tick, and remains stable until accepted.
 Refractory countdown ages on ticks, not synaptic events.
 
+Within a tick the countdown is evaluated before it is decremented, which makes
+the two fire paths deliberately asymmetric: a fire on the synaptic event path
+blocks the next `refractory` ticks, while a fire on the tick path (a
+superthreshold membrane leaving refractory with no new input) has its fresh
+countdown decremented in the same tick and therefore blocks only
+`refractory - 1` subsequent ticks. With `refractory = 1`, a tick-path fire
+permits firing again on the very next tick. This ordering is contract, not
+accident; the golden model pins it
+(`golden/test_soma.py::test_tick_path_fire_blocks_one_fewer_tick_than_event_path_fire`).
+
 Reset performs a deterministic 256-entry zero sweep before the soma accepts
 normal work. Configuration writes an entire neuron word atomically while idle.
 

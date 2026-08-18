@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Bit-exact golden model of the CeliumNeUR SomaCore neuron (SPEC.md §3).
+"""Bit-exact golden model of the CeliumNeUR SomaCore neuron (SPEC.md §6.1).
 
 This module is the referee: RTL is verified cycle-by-cycle against it.
 Discrete-time fixed-point LIF per Gerstner & Kistler (Neuronal Dynamics,

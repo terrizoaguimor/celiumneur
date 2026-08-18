@@ -5,6 +5,8 @@ tests must fire neurons, never certify silence).
 Regression anchors name the audited flaw each test guards against.
 """
 
+import pytest
+
 from soma import (
     VMEM_MAX,
     VMEM_MIN,
@@ -220,3 +222,16 @@ def test_repeated_stimulation_produces_periodic_firing():
         if soma.apply_synaptic_input(25):
             fires += 1
     assert fires >= 3  # 25 x 4 = 100 = theta -> period 4 → 5 fires in 20
+
+
+# --- Configuration validity (SPEC §6.1 threshold range) ----------------------
+
+def test_theta_outside_membrane_range_is_rejected():
+    # The soma-word field is unsigned 16-bit, but the membrane is signed
+    # 16-bit: thresholds above VMEM_MAX are unsatisfiable and 0 would fire
+    # at rest. Valid range is [1, VMEM_MAX]. Pins issue #3.
+    for bad in (0, VMEM_MAX + 1, (1 << 16) - 1):
+        with pytest.raises(ValueError):
+            NeuronParams(theta=bad, leak_shift=FAST_LEAK, refractory_ticks=0)
+    boundary = NeuronParams(theta=VMEM_MAX, leak_shift=FAST_LEAK, refractory_ticks=0)
+    assert boundary.theta == VMEM_MAX

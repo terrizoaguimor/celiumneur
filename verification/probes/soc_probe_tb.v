@@ -1,5 +1,5 @@
 // soc_probe_tb.v — raw-vvp proof of packet config, multicast and GID 1023.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 `timescale 1ns/1ps
 `default_nettype none
 

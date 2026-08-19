@@ -1,5 +1,5 @@
 // hypha_link_fifo.v — single-clock FIFO for Hyphae link buffering inside one
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // router. First-word-fall-through: `dout` presents the head whenever ~empty,
 // so the router arbitration sees the head combinationally in the same cycle.
 //

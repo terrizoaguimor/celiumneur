@@ -1,5 +1,5 @@
 // soma_dendrite.v — concurrent dendrite expansion + CWR learning engine.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // Two independent walkers share the explicit synapse table:
 //   - integration scans one accepted presynaptic GID and emits soma events;

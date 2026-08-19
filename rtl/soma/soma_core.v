@@ -1,5 +1,5 @@
 // soma_core.v — CeliumNeUR SomaCore v1 (SPEC.md §3).
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // Time-multiplexed neuron update engine: ONE physical datapath serves all
 // neurons, sweeping SRAM state (the "network is an illusion created by

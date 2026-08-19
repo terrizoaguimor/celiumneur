@@ -1,5 +1,5 @@
 // router_probe_tb.v — raw minimal probe: one packet into in_e of the corner
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // router (0,0) destined for core 1 (mask {1}). Expected: exactly one pulse
 // on out_e_valid with the same mask. Nothing else.
 `timescale 1ns/1ps

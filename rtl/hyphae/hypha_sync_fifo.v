@@ -1,5 +1,5 @@
 // hypha_sync_fifo.v — the ONLY authorized clock-domain-crossing cell in
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // CeliumNeUR (Invariant I3). No signal anywhere else in the RTL tree may
 // cross a clock boundary; lint/forbidden-pattern checks enforce this.
 //

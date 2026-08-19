@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: hyphae_mesh_2x2 (full fabric) vs golden HyphaeMesh.
 
 End-state transactional parity on every delivered packet, per core. The

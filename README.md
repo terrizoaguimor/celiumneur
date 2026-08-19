@@ -2,7 +2,7 @@
 
 **A transparent, verification-first neuromorphic SoC in synthesizable Verilog.**
 
-[![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSES/AGPL-3.0.txt)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSES/Apache-2.0.txt)
 [![Docs & artwork: CC BY 4.0](https://img.shields.io/badge/docs%20%2B%20artwork-CC%20BY%204.0-lightgrey.svg)](LICENSES/CC-BY-4.0.txt)
 [![Release: v0.0.2](https://img.shields.io/badge/release-v0.0.2-6f42c1.svg)](https://github.com/terrizoaguimor/celiumneur/releases/tag/v0.0.2)
 [![Golden tests: 55](https://img.shields.io/badge/golden%20tests-55-brightgreen)](#verification)
@@ -185,7 +185,7 @@ rule, not a claim of biological fidelity or equivalence to reference STDP.
 
 ## Licensing and citation
 
-- Code: AGPL-3.0-or-later.
+- Code: Apache-2.0.
 - Documentation and artwork: CC BY 4.0.
 - Audited prior work informed the invariants; no third-party RTL was copied.
   See [NOTICE.md](NOTICE.md) for third-party boundaries and the

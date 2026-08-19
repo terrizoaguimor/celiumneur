@@ -1,5 +1,5 @@
 // axon_diag_tb.v — pure-vvp diagnosis replica of the cocotb axon case.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 `timescale 1ns/1ps
 `default_nettype none
 module axon_diag_tb;

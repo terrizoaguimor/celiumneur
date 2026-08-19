@@ -1,5 +1,5 @@
 // dual_probe_tb.v — the smallest reproducer of "deliveries happen, no fire".
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // One synapse: gid1 -> post0, weight 150. Two arrivals. Post must fire.
 `timescale 1ns/1ps
 `default_nettype none

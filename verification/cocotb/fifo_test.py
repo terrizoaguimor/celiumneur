@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: hypha_link_fifo vs Python deque oracle.
 
 Timing discipline (applies to all CeliumNeUR benches): stimulus is driven on

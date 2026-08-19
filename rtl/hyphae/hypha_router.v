@@ -1,5 +1,5 @@
 // hypha_router.v — Hyphae fabric router (SPEC.md §2.1).
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // - X-Y dimension-ordered routing with multicast branch replication: a packet
 //   waits in line once and leaves on every output port that still carries

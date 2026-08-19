@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Dynamics-first tests for the Soma golden model (Invariant I8:
 tests must fire neurons, never certify silence).
 

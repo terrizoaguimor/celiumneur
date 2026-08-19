@@ -2,7 +2,7 @@
 
 
 
-Licensed: source code under AGPL-3.0-or-later (`LICENSES/AGPL-3.0.txt`);
+Licensed: source code under Apache-2.0 (`LICENSES/Apache-2.0.txt`);
 documentation and artwork under CC BY 4.0 (`LICENSES/CC-BY-4.0.txt`).
 
 ## Acknowledgements and independent-work statement
@@ -52,7 +52,7 @@ Verification record and debt: see SPEC.md.
 modules solely for the interactive chip visualization. They remain © Three.js
 authors and are distributed under the MIT license; the exact notice is in
 `render/html/THIRD-PARTY-NOTICES.md`. These files are not CeliumNeUR RTL and
-the project's AGPL license does not replace their upstream license.
+the project's Apache-2.0 license does not replace their upstream license.
 
 The OSS CAD Suite may be installed locally by the bootstrap tooling but is not
 tracked or redistributed by this repository. Icarus Verilog, Verilator,

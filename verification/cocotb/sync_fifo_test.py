@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: hypha_sync_fifo (Cummings-style CDC cell, Invariant I3) with two
 independent clocks vs a Python deque oracle.
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Render the current CeliumNeUR SoC contract as PNG and SVG.
 
 The diagram mirrors the default 4x256 top-level and its public transaction

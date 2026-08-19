@@ -1,5 +1,5 @@
 // sync_fifo_smoke_tb.v — raw vvp smoke test for hypha_sync_fifo (no cocotb).
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // Pushes 64 items on a 10ns domain, pops on a 7ns domain, checks order.
 `timescale 1ns/1ps
 `default_nettype none

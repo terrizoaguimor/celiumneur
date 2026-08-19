@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """make_demo_figures.py — regenerate the README evidence figures from REAL runs.
 
 Nothing hardcoded: the chip panel comes from the actual cocotb SoC run's

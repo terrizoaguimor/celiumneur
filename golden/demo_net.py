@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """demo_net.py — the CeliumNeUR sandbox demo network.
 
 A two-input temporal coincidence detector (an AND gate built from leak +

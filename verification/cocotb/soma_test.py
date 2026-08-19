@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: soma_core (4-neuron config) vs the golden Soma model.
 
 Parity contract (SPEC §3 v1): phase-mode operation — the bench issues a tick,

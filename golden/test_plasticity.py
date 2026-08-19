@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the golden plasticity rule (CWR, causal-window form):
 every property here is contractual for the RTL snooper."""
 

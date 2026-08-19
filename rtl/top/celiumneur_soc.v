@@ -1,5 +1,5 @@
 // celiumneur_soc.v — CeliumNeUR SoC v1: 4 neuro_tiles on the Hyphae 2x2 mesh.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // Wiring contract per core (SPEC §2 + tile seam):
 //   tile.out_spk_*  -> mesh PE ingress      (fire packets into the fabric)

@@ -10,7 +10,7 @@ authors:
     affiliation: "Celiums Solutions LLC"
     email: "mario@celiums.ai"
 type: software
-license: "AGPL-3.0-or-later"
+license: "Apache-2.0"
 repository-code: "https://github.com/terrizoaguimor/celiumneur"
 keywords:
   - neuromorphic

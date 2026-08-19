@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """plasticity.py — the CeliumNeUR plasticity rule, named CWR (causal-window
 rule), not STDP. (Review-driven naming change: Song-Miller-Abbott's STDP
 watches the pre/post interval; CWR pays arrivals whose causal window closed

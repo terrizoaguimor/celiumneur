@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Render the truth-bound CeliumNeUR v1 technical poster.
 
 All plots and the architecture panel are generated artifacts. The script
@@ -184,7 +184,7 @@ def main():
                    color=ORANGE, fontsize=7.4, ha="left")
 
     fig.text(0.5, 0.025,
-             "Celiums Solutions LLC  •  AGPL-3.0-or-later  •  DOI 10.5281/zenodo.21925426",
+             "Celiums Solutions LLC  •  Apache-2.0  •  DOI 10.5281/zenodo.21925426",
              color=MUTED, fontsize=8.5, ha="center")
 
     for output in OUTPUTS:

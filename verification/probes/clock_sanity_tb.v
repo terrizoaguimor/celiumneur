@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 module clock_sanity_tb;
     reg c1 = 0;
     reg c2 = 0;

@@ -2,7 +2,7 @@
 
 This document defines the behavior implemented by the repository. It replaces
 historical progress notes with a single auditable contract. Code is licensed
-AGPL-3.0-or-later; documentation and artwork are CC BY 4.0. Provenance and
+Apache-2.0; documentation and artwork are CC BY 4.0. Provenance and
 third-party boundaries are recorded in `NOTICE.md`.
 
 ## 1. Status and claim boundary

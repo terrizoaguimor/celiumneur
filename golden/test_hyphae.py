@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Dynamics-first tests for the Hyphae golden fabric (SPEC §4, Invariant I1).
 
 Every test moves packets across the mesh; silence-only tests are forbidden

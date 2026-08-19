@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """mutant_sweep.py — gate 4, mechanical: inject one seeded fault (mutant) into
 an RTL file at a time, rerun the FULL cocotb suite via run_tests.py (the
 proven process configuration), and the suite MUST fail.

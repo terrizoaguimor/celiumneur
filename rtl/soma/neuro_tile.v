@@ -1,5 +1,5 @@
 // neuro_tile.v — one CeliumNeUR tile: soma_dendrite driving soma_core.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // Reviewed seams closed end-to-end:
 //
 //   - spk input: hypha_link_fifo (verified single-clock FIFO) + PE

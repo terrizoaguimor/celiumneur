@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """render_blender.py — CeliumNeUR die hero render (Blender >= 4.x, headless).
 
 Run:  "C:\\Program Files\\Blender Foundation\\Blender 5.1\\blender.exe" -b --python render_blender.py

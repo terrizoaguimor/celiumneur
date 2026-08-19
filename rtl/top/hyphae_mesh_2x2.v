@@ -1,5 +1,5 @@
 // hyphae_mesh_2x2.v — Hyphae fabric integration: 4 routers as a 2x2 mesh
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 // (SPEC.md §2, v1 scale). Pure structural wiring, explicit per-link wires —
 // 2x2 is small, and any wiring mistake should be visible at a glance instead
 // of hiding inside generate arithmetic.

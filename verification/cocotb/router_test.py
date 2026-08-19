@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: hypha_router (corner core (0,0)) vs golden RouterModel.
 
 Bench architecture (third and final): SYNCHRONOUS CYCLE LEDGER. Exactly one

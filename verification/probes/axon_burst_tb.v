@@ -1,5 +1,5 @@
 // axon_burst_tb.v — three rapid electrode stimuli; three axon packets out.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 `timescale 1ns/1ps
 `default_nettype none
 module axon_burst_tb;

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """demo_plasticity.py — golden proof that the network LEARNS:
 
 drive A and B paired every ROUNDS ticks; A->detector should potentiate toward

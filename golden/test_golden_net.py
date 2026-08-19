@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """Whole-network golden regressions that pin RTL-visible semantics."""
 
 from golden_net import GLOBAL_NEURONS, NeuroSandbox

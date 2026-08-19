@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """cocotb: celiumneur_soc (4 tiles + mesh) vs the NeuroSandbox golden.
 
 The sandbox stages spikes for delivery on the next tick while the chip lets

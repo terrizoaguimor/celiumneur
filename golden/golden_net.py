@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 """golden_net.py — end-to-end golden simulator of CeliumNeUR (SPEC §4+§6).
 
 Composition of the two verified referees: HyphaeMesh moves spike packets,

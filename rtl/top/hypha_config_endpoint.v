@@ -1,5 +1,5 @@
 // hypha_config_endpoint.v — ordered CONFIG packet assembler for one tile.
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 //
 // A 64-bit write is five routed single-flit packets with the same destination
 // mask. The mesh preserves order along a path, and every destination owns an
